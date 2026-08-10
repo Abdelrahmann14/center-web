@@ -1,0 +1,16 @@
+{
+  "name": "@center/design-tokens",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Single source of truth for center's design language, shared across every client (desktop web today, React Native mobile later).",
+  "main": "tokens.js",
+  "types": "tokens.d.ts",
+  "exports": {
+    ".": "./tokens.js",
+    "./theme.css": "./theme.css"
+  },
+  "scripts": {
+    "generate": "node generate-theme.mjs"
+  }
+}

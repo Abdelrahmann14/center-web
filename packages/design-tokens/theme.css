@@ -1,0 +1,7 @@
+/* GENERATED from tokens.js by generate-theme.mjs — do not edit by hand.
+   Run `npm run generate` in @center/design-tokens after changing tokens. */
+@theme {
+  --color-accent: #3B7A8C;
+  --color-accent-hover: #2F6473;
+  --color-dark: #0F172A;
+}
