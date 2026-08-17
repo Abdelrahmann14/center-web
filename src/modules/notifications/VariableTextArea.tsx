@@ -40,6 +40,7 @@ export function VariableTextArea({
   disabled,
   leading,
   fieldTint,
+  onCommit,
 }: {
   value: string;
   onChange: (v: string) => void;
@@ -48,6 +49,8 @@ export function VariableTextArea({
   disabled?: boolean;
   leading?: React.ReactNode;
   fieldTint?: string;
+  /** Fired when the author leaves the field - see VariableEditor.onCommit. */
+  onCommit?: () => void;
 }) {
   const [vars, setVars] = useState<MessageVariable[]>(cache ?? []);
 
@@ -71,6 +74,7 @@ export function VariableTextArea({
       disabled={disabled}
       leading={leading}
       fieldTint={fieldTint}
+      onCommit={onCommit}
     />
   );
 }

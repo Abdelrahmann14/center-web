@@ -198,9 +198,11 @@ export default function LecturesPage() {
     <div>
       {/* Sticky filter bar - same structure as the students page. */}
       <div className="sticky top-0 z-20 -mx-4 mt-3 border-b border-slate-200 bg-white px-4 py-3 sm:-mx-6 sm:px-6">
-        {/* Row 1 - search + add */}
-        <div className="flex items-center gap-3">
-          <div className="relative min-w-[240px] flex-1">
+        {/* Row 1 - search + add. It wraps on a phone: side by side, a 240px
+            minimum on the search plus the button came to more than the frame is
+            wide, so the button was pushed off the edge of the screen. */}
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="relative w-full min-w-0 flex-1 sm:w-auto sm:min-w-[240px]">
             <Search className="absolute right-3 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-400" />
             <input
               value={search}
@@ -221,7 +223,7 @@ export default function LecturesPage() {
           </div>
           <button
             onClick={() => setShowAdd(true)}
-            className="flex h-11 shrink-0 items-center gap-2 rounded-xl bg-accent px-4 font-medium text-white shadow-sm transition hover:bg-accent-hover"
+            className="flex h-11 w-full shrink-0 items-center justify-center gap-2 rounded-xl bg-accent px-4 font-medium text-white shadow-sm transition hover:bg-accent-hover sm:w-auto"
           >
             <Plus className="h-5 w-5" />
             حصة جديدة

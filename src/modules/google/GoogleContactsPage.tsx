@@ -199,11 +199,15 @@ export default function GoogleContactsPage() {
             <h2 className="text-lg font-bold text-slate-800">جهات اتصال Google</h2>
           </div>
 
-          <div className="flex shrink-0 flex-wrap items-center gap-2">
+          {/* Stacked on a phone - connect first, then the sync under it: side by
+              side the pair was wider than the screen, so the sync button sat
+              half off the edge. The order is the order of the work: there is
+              nothing to sync to until an account is linked. */}
+          <div className="flex w-full shrink-0 flex-col items-stretch gap-2 sm:w-auto sm:flex-row sm:items-center">
             <button
               onClick={connect}
               disabled={!canConnect || connecting}
-              className="flex shrink-0 items-center gap-2 rounded-xl bg-accent px-4 py-2.5 font-medium text-white transition hover:bg-accent-hover disabled:opacity-50"
+              className="flex shrink-0 items-center justify-center gap-2 rounded-xl bg-accent px-4 py-2.5 font-medium text-white transition hover:bg-accent-hover disabled:opacity-50"
             >
               {connecting ? <Loader2 className="h-5 w-5 animate-spin" /> : <Plus className="h-5 w-5" />}
               ربط حساب Google
@@ -220,7 +224,7 @@ export default function GoogleContactsPage() {
                   ? "اربط حساب Google أولاً"
                   : "حفظ أرقام كل الطلاب في الحسابات المرتبطة"
               }
-              className="flex shrink-0 items-center gap-2 rounded-xl border border-slate-300 px-4 py-2.5 font-medium text-slate-700 transition hover:border-accent/50 hover:text-accent disabled:cursor-not-allowed disabled:opacity-50"
+              className="flex shrink-0 items-center justify-center gap-2 rounded-xl border border-slate-300 px-4 py-2.5 font-medium text-slate-700 transition hover:border-accent/50 hover:text-accent disabled:cursor-not-allowed disabled:opacity-50"
             >
               {resync ? (
                 <Loader2 className="h-5 w-5 animate-spin" />

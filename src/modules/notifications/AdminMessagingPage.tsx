@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Send, Loader2, Search, X, MessageCircle, History, Check, Users, Clock, CheckCircle2, Ban, RotateCcw,
   ChevronDown, UserPlus, ClipboardCheck,
@@ -361,21 +361,36 @@ function AutomatedTab() {
 }
 
 /**
- * Persists automatically a short beat after the last edit - no save button. The
- * `save` callback announces success and failure itself (via toast). It saves only
- * when the values genuinely differ from the ones first loaded, so mounting (and
- * StrictMode's double-invoked effects) never trigger a spurious save.
+ * Saves a setting the moment it is switched, and never on the first render.
+ *
+ * <p>Only for discrete controls - a toggle, a checkbox. Flipping one IS the
+ * decision, so there is nothing to wait for. Free text is different and is
+ * handled by {@link useFlushOnUnmount} plus the field's own blur: it used to run
+ * on a timer after every keystroke, which meant a success toast every second or
+ * so while someone was still composing a sentence.
  */
-function useAutosave(save: () => Promise<void>, deps: unknown[]): void {
-  const savedKey = useRef(JSON.stringify(deps));
+function useSettingSave(save: () => void, deps: unknown[]): void {
+  const first = useRef(true);
   useEffect(() => {
-    const key = JSON.stringify(deps);
-    if (key === savedKey.current) return;
-    savedKey.current = key;
-    const t = setTimeout(() => { void save().catch(() => {}); }, 700);
-    return () => clearTimeout(t);
+    if (first.current) {
+      first.current = false;
+      return;
+    }
+    save();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, deps);
+}
+
+/**
+ * The safety net under save-on-blur: leaving the page (or closing the screen)
+ * without touching anything else must not drop the last edit. `save` is expected
+ * to be a no-op when nothing actually changed, so this costs nothing in the
+ * normal case - including StrictMode's throwaway first unmount.
+ */
+function useFlushOnUnmount(save: () => void): void {
+  const latest = useRef(save);
+  latest.current = save;
+  useEffect(() => () => latest.current(), []);
 }
 
 /** Staggered reveal: each body section fades and rises in when the card opens. */
@@ -483,32 +498,51 @@ function AutomationCard({ automation }: { automation: Automation }) {
 
   const audience: Audience = toParent && toStudent ? "BOTH" : toStudent ? "STUDENT" : "PARENT";
 
-  // The base message and its image toggle save themselves a beat after each edit,
-  // announcing it with a toast rather than any inline "saving" hint.
-  useAutosave(async () => {
+  /**
+   * What the server already holds. Everything below compares against it, so a
+   * save happens when something genuinely changed and at no other time - that is
+   * what stops a toast appearing for a click that changed nothing.
+   */
+  const saved = useRef({
+    base: automation.base.trim(),
+    image: automation.base_send_as_image,
+    audience: (automation.audience ?? "BOTH") as Audience,
+  });
+
+  const persist = useCallback(async () => {
+    const next = { base: base.trim(), image: baseSendAsImage, audience };
+    const prev = saved.current;
+    if (next.base === prev.base && next.image === prev.image && next.audience === prev.audience) {
+      return;
+    }
+    // Claimed before the request so two flushes in a row (a blur that lands with
+    // an unmount) cannot send the same change twice.
+    saved.current = next;
     try {
       await api.put(`/messaging/whatsapp/automations/${automation.type.toLowerCase()}`, {
-        base: base.trim(),
-        base_send_as_image: baseSendAsImage,
-        audience,
+        base: next.base,
+        base_send_as_image: next.image,
+        audience: next.audience,
       });
       toast.success("تم تحديث الرسالة");
     } catch (err) {
+      // Still unsaved, so the next blur or switch tries again.
+      saved.current = prev;
       toast.error(err instanceof ApiError ? err.message : "تعذّر الحفظ");
-      throw err;
     }
-  }, [base, baseSendAsImage, audience]);
+  }, [automation.type, base, baseSendAsImage, audience]);
+
+  // The two settings save as they are switched; the message text saves when the
+  // author leaves the box (onCommit below), and again on the way out.
+  useSettingSave(() => void persist(), [baseSendAsImage, audience]);
+  useFlushOnUnmount(() => void persist());
 
   async function generate() {
     if (!base.trim()) { toast.error("اكتب الرسالة الأساسية أولاً"); return; }
     setGenerating(true);
     try {
       // Persist the base first so the server rewords the current text.
-      await api.put(`/messaging/whatsapp/automations/${automation.type.toLowerCase()}`, {
-        base: base.trim(),
-        base_send_as_image: baseSendAsImage,
-        audience,
-      });
+      await persist();
       const res = await api.post<Automation>(`/messaging/whatsapp/automations/${automation.type.toLowerCase()}/generate`);
       setAlternatives(res.alternatives);
       toast.success("تم توليد صيغ بديلة");
@@ -582,6 +616,7 @@ function AutomationCard({ automation }: { automation: Automation }) {
                 onChange={setBase}
                 rows={2}
                 leading={<ImageSwitch checked={baseSendAsImage} onChange={setBaseSendAsImage} />}
+                onCommit={() => void persist()}
               />
             </Reveal>
 
@@ -615,22 +650,29 @@ function AlternativeEditor({
   const [body, setBody] = useState(alternative.body);
   const [sendAsImage, setSendAsImage] = useState(alternative.send_as_image);
 
-  // Each variant saves itself and reports via a toast; the in-place mutation keeps
-  // the parent's live state in sync.
-  useAutosave(async () => {
+  // Same rule as the base message: the switch saves at once, the text saves when
+  // the author steps out of it. The in-place mutation keeps the parent in sync.
+  const persist = useCallback(async () => {
+    const next = { body: body.trim(), image: sendAsImage };
+    if (next.body === alternative.body && next.image === alternative.send_as_image) return;
+    const prev = { body: alternative.body, image: alternative.send_as_image };
+    alternative.body = next.body;
+    alternative.send_as_image = next.image;
     try {
       await api.put(`/messaging/whatsapp/automations/variants/${alternative.id}`, {
-        body: body.trim(),
-        send_as_image: sendAsImage,
+        body: next.body,
+        send_as_image: next.image,
       });
-      alternative.body = body.trim();
-      alternative.send_as_image = sendAsImage;
       toast.success(`تم تحديث الصيغة ${index}`);
     } catch (err) {
+      alternative.body = prev.body;
+      alternative.send_as_image = prev.image;
       toast.error(err instanceof ApiError ? err.message : "تعذّر الحفظ");
-      throw err;
     }
-  }, [body, sendAsImage]);
+  }, [alternative, index, body, sendAsImage]);
+
+  useSettingSave(() => void persist(), [sendAsImage]);
+  useFlushOnUnmount(() => void persist());
 
   return (
     <div>
@@ -641,6 +683,7 @@ function AlternativeEditor({
         rows={1}
         leading={<ImageSwitch checked={sendAsImage} onChange={setSendAsImage} />}
         fieldTint={tint}
+        onCommit={() => void persist()}
       />
     </div>
   );

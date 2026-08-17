@@ -4,6 +4,7 @@ import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/auth/AuthContext";
 import { Logo } from "@/components/Logo";
 import { Field, FieldError, inputClass } from "@/components/ui";
+import { PasswordInput } from "@/components/PasswordInput";
 import { toast } from "@/components/ui/toast";
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -48,15 +49,21 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-slate-200 p-4">
-      <div className="w-full max-w-sm animate-page rounded-2xl border border-slate-200 bg-white p-8 shadow-xl">
-        <div className="mb-6 flex flex-col items-center gap-3">
-          <Logo className="h-44 w-auto max-w-[360px]" />
+    // h-dvh + centred, so on a phone the form sits in the middle of what is
+    // actually on screen and the page never scrolls: `min-h-screen` measured the
+    // viewport at its tallest (address bar hidden), which left the card taller
+    // than the visible area and pushed the button under the fold. The logo and
+    // the padding shrink on small screens for the same reason - the card has to
+    // fit, not merely start at the top.
+    <div className="flex h-dvh items-center justify-center overflow-hidden bg-slate-200 p-4">
+      <div className="w-full max-w-sm animate-page rounded-2xl border border-slate-200 bg-white p-6 shadow-xl sm:p-8">
+        <div className="mb-5 flex flex-col items-center gap-2 sm:mb-6 sm:gap-3">
+          <Logo className="h-28 w-auto max-w-[360px] sm:h-44" />
           <p className="text-sm text-slate-500">تسجيل الدخول إلى النظام</p>
         </div>
 
         {/* noValidate: the system owns validation, so the browser bubble stays out. */}
-        <form onSubmit={handleSubmit} noValidate className="space-y-5">
+        <form onSubmit={handleSubmit} noValidate className="space-y-4 sm:space-y-5">
           <Field label="البريد الإلكتروني">
             <div className="relative">
               <FieldError message={emailErr} />
@@ -73,13 +80,7 @@ export default function LoginPage() {
           <Field label="كلمة المرور">
             <div className="relative">
               <FieldError message={pwErr} />
-              <input
-                type="password"
-                dir="ltr"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                className={inputClass}
-              />
+              <PasswordInput value={password} onChange={setPassword} />
             </div>
           </Field>
 

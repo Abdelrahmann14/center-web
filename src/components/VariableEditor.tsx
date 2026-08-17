@@ -121,15 +121,60 @@ function useFloating(
   return style;
 }
 
-/** Build one chip element for a variable. */
+/**
+ * Build one chip element for a variable, with its own remove control.
+ *
+ * <p>The × is not decoration. A chip is `contenteditable=false`, which is what
+ * makes it one object to the caret - and on a touch keyboard that is exactly
+ * what backspace will not delete: Android's soft delete walks over the atom and
+ * leaves it sitting there, so a variable added by mistake could not be taken
+ * out again on a phone at all. Backspace beside a chip is handled explicitly
+ * below for the desktop, and this is the way in that needs no keyboard.
+ */
 function chipNode(v: MessageVariable): HTMLSpanElement {
   const el = document.createElement("span");
   el.dataset.var = v.key;
   el.contentEditable = "false";
   el.className = CHIP_CLASS;
-  el.textContent = v.label;
   el.title = v.example ? `${v.description} - مثال: ${v.example}` : v.description;
+
+  const label = document.createElement("span");
+  label.textContent = v.label;
+  el.appendChild(label);
+
+  const remove = document.createElement("span");
+  remove.dataset.chipRemove = "1";
+  remove.setAttribute("role", "button");
+  remove.setAttribute("aria-label", `حذف ${v.label}`);
+  remove.title = "حذف";
+  remove.textContent = "×";
+  remove.className =
+    "ms-1 -me-0.5 cursor-pointer select-none rounded px-1 text-[0.9rem] leading-none " +
+    "text-accent/60 transition hover:bg-accent/20 hover:text-accent";
+  el.appendChild(remove);
   return el;
+}
+
+/**
+ * The chip immediately before (dir -1) or after (dir 1) a collapsed caret, or
+ * null when the caret is in the middle of ordinary text. Empty text nodes left
+ * behind by earlier edits are stepped over - they are bookkeeping, not content.
+ */
+function chipBeside(range: Range, dir: -1 | 1): HTMLElement | null {
+  const container = range.startContainer;
+  const offset = range.startOffset;
+  let node: Node | null;
+  if (container.nodeType === Node.TEXT_NODE) {
+    const length = container.nodeValue?.length ?? 0;
+    if (dir < 0 ? offset > 0 : offset < length) return null;
+    node = dir < 0 ? container.previousSibling : container.nextSibling;
+  } else {
+    node = (dir < 0 ? container.childNodes[offset - 1] : container.childNodes[offset]) ?? null;
+  }
+  while (node && node.nodeType === Node.TEXT_NODE && !node.nodeValue) {
+    node = dir < 0 ? node.previousSibling : node.nextSibling;
+  }
+  return node instanceof HTMLElement && node.dataset.var ? node : null;
 }
 
 /**
@@ -209,6 +254,7 @@ export function VariableEditor({
   maxLength = 2000,
   leading,
   fieldTint,
+  onCommit,
 }: {
   value: string;
   onChange: (v: string) => void;
@@ -217,6 +263,12 @@ export function VariableEditor({
   placeholder?: string;
   disabled?: boolean;
   maxLength?: number;
+  /**
+   * Called when the author leaves the field - the moment a screen that saves by
+   * itself should write. Typing is not an instruction to save; stepping away
+   * from what you wrote is.
+   */
+  onCommit?: () => void;
   /**
    * Controls that belong to this field and share its one chrome line - the
    * field's own settings sit at the start of the row, the writing tools at the
@@ -466,6 +518,43 @@ export function VariableEditor({
     }
   }
 
+  /**
+   * Delete a whole chip when the caret sits against one.
+   *
+   * <p>Browsers disagree about what backspace does next to an atomic inline
+   * element: Chrome selects it and asks for a second press, and an Android soft
+   * keyboard mostly refuses to touch it at all - so a variable inserted by
+   * mistake became permanent on a phone. Taking the deletion over makes it one
+   * press everywhere. `beforeinput` rather than `keydown` because that is the
+   * only event a soft keyboard reliably raises.
+   */
+  function onBeforeInput(e: React.FormEvent<HTMLDivElement>) {
+    const native = e.nativeEvent as InputEvent;
+    const back = native.inputType === "deleteContentBackward";
+    if (!back && native.inputType !== "deleteContentForward") return;
+    const sel = window.getSelection();
+    if (!sel || !sel.rangeCount) return;
+    const range = sel.getRangeAt(0);
+    if (!range.collapsed || !ref.current?.contains(range.startContainer)) return;
+    const chip = chipBeside(range, back ? -1 : 1);
+    if (!chip) return;
+    e.preventDefault();
+    chip.remove();
+    emit();
+    rememberCaret();
+  }
+
+  /** The × on a chip removes it, on a mouse or a finger, without moving focus. */
+  function onChipRemove(e: React.PointerEvent<HTMLDivElement>) {
+    const target = e.target as HTMLElement | null;
+    if (!target?.dataset?.chipRemove) return;
+    const chip = target.closest<HTMLElement>("[data-var]");
+    if (!chip) return;
+    e.preventDefault();
+    chip.remove();
+    emit();
+  }
+
   function onPaste(e: React.ClipboardEvent<HTMLDivElement>) {
     // Paste as plain text: foreign markup in a contenteditable is how these
     // fields end up carrying invisible styling nobody asked for.
@@ -575,8 +664,13 @@ export function VariableEditor({
         onKeyUp={rememberCaret}
         onMouseUp={rememberCaret}
         onKeyDown={onKeyDown}
+        onBeforeInput={onBeforeInput}
+        onPointerDown={onChipRemove}
         onPaste={onPaste}
-        onBlur={rememberCaret}
+        onBlur={() => {
+          rememberCaret();
+          onCommit?.();
+        }}
         className={`w-full whitespace-pre-wrap break-words rounded-md border border-slate-300 px-3.5 py-2.5 text-sm leading-6 text-slate-800 outline-none transition
           empty:before:pointer-events-none empty:before:text-slate-400 empty:before:content-[attr(data-placeholder)]
           focus:border-accent focus:ring-2 focus:ring-accent/20

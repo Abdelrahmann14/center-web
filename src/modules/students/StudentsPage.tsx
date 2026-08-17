@@ -557,13 +557,14 @@ export default function StudentsPage() {
       {loading ? (
         <LoaderBlock />
       ) : (
-        // The table never scrolls sideways: no minimum width and no pixel
-        // column, so every column is a share of whatever the frame is and the
-        // eleven of them always add up to it. What has to give gives inside the
-        // cell instead - free text wraps, the numbers truncate with the full
-        // value on hover, the action icons wrap onto a second row.
-        <div className="mt-3 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-          <table className="w-full table-fixed text-right text-sm">
+        // Eleven columns as percentage shares of the frame, which works down to
+        // a laptop and breaks on a phone: at 375px each share is about fourteen
+        // pixels and every cell turns into a column of single letters. The
+        // shares are kept - they are right whenever there is room - and a floor
+        // is put under them, so on a narrow screen the TABLE scrolls sideways
+        // inside its own box instead of the whole page doing it.
+        <div className="mt-3 overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-sm">
+          <table className="w-full min-w-[1000px] table-fixed text-right text-sm">
             <colgroup>
               {/* Shares, adding up to exactly 100. App and Google columns moved
                   into the row-detail view, so the freed width goes to the

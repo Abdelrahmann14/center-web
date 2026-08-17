@@ -12,6 +12,7 @@ import {
   CalendarDays,
 } from "@/components/icons";
 import { LoginNameField } from "@/components/LoginNameField";
+import { PasswordInput } from "@/components/PasswordInput";
 import { localPartOf } from "@/lib/useEmailAvailability";
 import { api, ApiError } from "@/lib/api";
 import { toast } from "@/components/ui/toast";
@@ -95,7 +96,10 @@ export default function UsersPage() {
         <LoaderBlock />
       ) : (
         <div className="mt-5 overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-sm">
-          <table className="w-full text-right text-sm">
+          {/* A floor under the eight columns: without it a phone squeezed them
+              until the permission chips stacked one word per line. Narrow
+              screens scroll this box, not the page. */}
+          <table className="w-full min-w-[900px] text-right text-sm">
             <thead className={THEAD}>
               <tr>
                 <th className="px-5 py-3 font-medium">اسم المساعد</th>
@@ -150,16 +154,7 @@ export default function UsersPage() {
                     ) : u.permissions.length === 0 ? (
                       <span className="text-xs text-slate-400">لا توجد صلاحيات</span>
                     ) : (
-                      <div className="flex max-w-md flex-wrap gap-1.5">
-                        {u.permissions.map((p) => (
-                          <span
-                            key={p}
-                            className="rounded-md bg-accent/10 px-2 py-0.5 text-[11px] font-medium text-accent"
-                          >
-                            {p}
-                          </span>
-                        ))}
-                      </div>
+                      <PermissionChips permissions={u.permissions} />
                     )}
                   </td>
                   <td className="px-5 py-3.5">
@@ -237,6 +232,46 @@ export default function UsersPage() {
           onConfirm={() => handleDelete(confirmDelete)}
           onClose={() => setConfirmDelete(null)}
         />
+      )}
+    </div>
+  );
+}
+
+/** How many grants a row shows before the rest collapse into a counter. */
+const PERMS_SHOWN = 4;
+
+/**
+ * An assistant's grants as chips, but only the first few.
+ *
+ * <p>A fully-trusted assistant holds a dozen or more, and printing them all
+ * turned one row into a paragraph that pushed every other column out of shape -
+ * a list nobody reads costing the whole table its legibility. The rest sit
+ * behind a counter, and the full list is one click away in the permissions
+ * dialog, which is where it can actually be acted on.
+ */
+function PermissionChips({ permissions }: { permissions: string[] }) {
+  const [expanded, setExpanded] = useState(false);
+  const shown = expanded ? permissions : permissions.slice(0, PERMS_SHOWN);
+  const hidden = permissions.length - shown.length;
+  return (
+    <div className="flex max-w-md flex-wrap items-center gap-1.5">
+      {shown.map((p) => (
+        <span
+          key={p}
+          className="rounded-md bg-accent/10 px-2 py-0.5 text-[11px] font-medium text-accent"
+        >
+          {p}
+        </span>
+      ))}
+      {hidden > 0 && (
+        <button
+          type="button"
+          onClick={() => setExpanded(true)}
+          title={permissions.slice(PERMS_SHOWN).join("، ")}
+          className="rounded-md bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-500 transition hover:bg-slate-200"
+        >
+          +{hidden.toLocaleString("ar-EG")}
+        </button>
       )}
     </div>
   );
@@ -367,14 +402,12 @@ function UserForm({
           label="كلمة المرور"
           hint={isEdit ? "اتركها فارغة للإبقاء على كلمة المرور الحالية" : undefined}
         >
-          <input
-            type="text"
+          <PasswordInput
             value={password}
-            onChange={(e) => setPassword(e.target.value)}
+            onChange={setPassword}
             required={!isEdit}
             {...requiredArabic}
             minLength={4}
-            className={inputClass}
             placeholder={isEdit ? "••••••" : undefined}
           />
         </Field>

@@ -21,6 +21,7 @@ import { AddStudentModal } from "@/modules/students/AddStudentModal";
 import { AddLectureModal } from "@/modules/lectures/AddLectureModal";
 import { cachedGet } from "@/lib/dataCache";
 import { fmtTime } from "@/lib/datetime";
+import { useOnline } from "@/lib/useOnline";
 import type { Group } from "@/modules/students/StudentForm";
 
 /** Section buckets, rendered in this order; empty ones disappear. */
@@ -44,6 +45,8 @@ interface ModuleCard {
   adminOnly?: boolean;
   /** Module gate, for admin-only screens that carry no permission of their own. */
   module?: string;
+  /** Works with no connection - same list as NAV in DashboardLayout, same reason. */
+  offline?: boolean;
 }
 
 // Same icon as the sidebar for the same screen - see the note on NAV in
@@ -56,6 +59,7 @@ const MODULES: ModuleCard[] = [
     icon: <Users className="h-6 w-6" />,
     section: "daily",
     perm: ["STUDENT_VIEW"],
+    offline: true,
   },
   {
     to: "/lectures",
@@ -64,6 +68,7 @@ const MODULES: ModuleCard[] = [
     icon: <BookOpen className="h-6 w-6" />,
     section: "daily",
     perm: ["LESSON_VIEW"],
+    offline: true,
   },
   {
     to: "/lesson-registration",
@@ -72,6 +77,7 @@ const MODULES: ModuleCard[] = [
     icon: <ClipboardCheck className="h-6 w-6" />,
     section: "daily",
     perm: ["REGISTRATION_ACCESS"],
+    offline: true,
   },
   {
     to: "/financials",
@@ -80,6 +86,7 @@ const MODULES: ModuleCard[] = [
     icon: <ReceiptText className="h-6 w-6" />,
     section: "daily",
     perm: ["FINANCE_VIEW"],
+    offline: true,
   },
   {
     to: "/exams",
@@ -179,12 +186,16 @@ function HeaderDateTime() {
 
 export default function DashboardHome() {
   const { effectiveRole, can, hasModule } = useAuth();
+  const online = useOnline();
   const navigate = useNavigate();
   const [addStudent, setAddStudent] = useState(false);
   const [addLecture, setAddLecture] = useState(false);
   const [groups, setGroups] = useState<Group[] | null>(null);
 
   const modules = MODULES.filter((m) => {
+    // Offline, a card whose screen the mirror cannot serve is removed rather
+    // than left to open on an empty page - same rule as the sidebar.
+    if (!online && !m.offline) return false;
     if (m.module && !hasModule(m.module)) return false;
     return m.adminOnly ? effectiveRole === "admin" : m.perm ? m.perm.some(can) : true;
   });

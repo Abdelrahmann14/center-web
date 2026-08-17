@@ -967,8 +967,13 @@ function StudentPanel({
         </div>
 
         {student && (
-          <div className="flex items-center gap-2">
-            <div className="w-44">
+          // Wraps, and the homework picker takes the whole line on a phone. Held
+          // on one row these four controls came to well over a phone's width, so
+          // the row stretched the panel past the screen: "حفظ" ended up outside
+          // the card and the page picked up a sideways scroll that carried every
+          // other field out with it.
+          <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
+            <div className="w-full sm:w-44">
               <Select value={hwFlag} onChange={onHwChange} placeholder="حالة الواجب" options={HW_OPTIONS} />
             </div>
             {/* Opens the full student form instead of an inline editor, so the
@@ -996,7 +1001,7 @@ function StudentPanel({
               // A blocked student cannot attend; the server refuses too, this
               // just says so before the click.
               disabled={registering || (!isEdit && !student.is_active)}
-              className="flex items-center gap-2 rounded-xl bg-accent px-4 py-2 text-sm font-medium text-white transition hover:bg-accent-hover disabled:opacity-60"
+              className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-accent px-4 py-2 text-sm font-medium text-white transition hover:bg-accent-hover disabled:opacity-60 sm:flex-none"
             >
               {registering ? (
                 <Loader2 className="h-4 w-4 animate-spin" />

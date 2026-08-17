@@ -21,6 +21,7 @@ import { ConfirmDialog } from "@/components/ui";
 import { PAGE_FRAME_ID } from "@/components/PencilLoader";
 import { getScroll, saveScroll } from "@/lib/pageState";
 import { toast } from "@/components/ui/toast";
+import { useOnline } from "@/lib/useOnline";
 import { SyncStatusPill } from "@/sync/SyncStatusPill";
 
 interface NavItem {
@@ -31,6 +32,16 @@ interface NavItem {
   perm?: string[];
   /** Admin-only screens (the workspace owner), never assistants. */
   adminOnly?: boolean;
+  /**
+   * The screen still works with no connection - its reads are answered by the
+   * offline mirror (see WebSyncStore.resolveRead) and its writes are queued.
+   *
+   * <p>Everything else is HIDDEN while offline rather than left to fail: those
+   * screens open on a request the mirror cannot answer, so the page lands empty
+   * or errors and the only way out is a reload - which, offline, is worse. A
+   * door that leads nowhere is removed, not labelled.
+   */
+  offline?: boolean;
   /**
    * Module the screen belongs to. Only needed for admin-only screens: a
    * permission-gated screen already disappears when its module is switched off,
@@ -47,14 +58,14 @@ interface NavItem {
  * here is "education", so a mortarboard says nothing about which one this is.
  */
 const NAV: NavItem[] = [
-  { to: "/", label: "الرئيسية", icon: <Home className="h-5 w-5" /> },
+  { to: "/", label: "الرئيسية", icon: <Home className="h-5 w-5" />, offline: true },
   // People, not a graduation: this screen is the roster.
-  { to: "/students", label: "الطلاب", icon: <Users className="h-5 w-5" />, perm: ["STUDENT_VIEW"] },
-  { to: "/lectures", label: "الحصص", icon: <BookOpen className="h-5 w-5" />, perm: ["LESSON_VIEW"] },
+  { to: "/students", label: "الطلاب", icon: <Users className="h-5 w-5" />, perm: ["STUDENT_VIEW"], offline: true },
+  { to: "/lectures", label: "الحصص", icon: <BookOpen className="h-5 w-5" />, perm: ["LESSON_VIEW"], offline: true },
   // The act is ticking names present, so the tick is the icon.
-  { to: "/lesson-registration", label: "تسجيل الحصة", icon: <ClipboardCheck className="h-5 w-5" />, perm: ["REGISTRATION_ACCESS"] },
+  { to: "/lesson-registration", label: "تسجيل الحصة", icon: <ClipboardCheck className="h-5 w-5" />, perm: ["REGISTRATION_ACCESS"], offline: true },
   // Invoices, not a wallet - it matches what the page actually draws.
-  { to: "/financials", label: "الحسابات", icon: <ReceiptText className="h-5 w-5" />, perm: ["FINANCE_VIEW"] },
+  { to: "/financials", label: "الحسابات", icon: <ReceiptText className="h-5 w-5" />, perm: ["FINANCE_VIEW"], offline: true },
   // An exam is a question paper; this is the only "?" in the set.
   { to: "/exams", label: "الاختبارات", icon: <FileQuestion className="h-5 w-5" />, perm: ["EXAM_CREATE", "EXAM_UPDATE", "EXAM_DELETE", "EXAM_PUBLISH"] },
   // Columns, not a trend line: the data is per-lesson counts, not a time series.
@@ -72,6 +83,7 @@ const NAV: NavItem[] = [
 
 export default function DashboardLayout() {
   const { user, effectiveRole, logout, can, hasModule } = useAuth();
+  const online = useOnline();
   const navigate = useNavigate();
   const location = useLocation();
   const mainRef = useRef<HTMLDivElement>(null);
@@ -125,12 +137,20 @@ export default function DashboardLayout() {
   // all workspace permissions), while each assistant sees exactly the screens
   // the admin granted them. Service Integrations stays admin-only.
   const items = NAV.filter((n) => {
+    // With no connection, only the screens the mirror can actually serve stay
+    // reachable - see NavItem.offline.
+    if (!online && !n.offline) return false;
     if (n.module && !hasModule(n.module)) return false;
     return n.adminOnly ? effectiveRole === "admin" : n.perm ? n.perm.some(can) : true;
   });
 
   return (
-    <div className="flex h-screen gap-2 overflow-hidden bg-dark p-2 sm:gap-3 sm:p-3">
+    // h-dvh, not h-screen: on a phone `100vh` is the tallest the viewport ever
+    // gets (browser chrome hidden), so with the address bar showing the shell was
+    // taller than the visible area - the open drawer ran off the bottom and a
+    // strip of page appeared under it until the bar collapsed. The dynamic unit
+    // tracks the area actually on screen.
+    <div className="flex h-dvh gap-2 overflow-hidden bg-dark p-2 sm:gap-3 sm:p-3">
       {/* Dimmed backdrop behind the mobile drawer. */}
       {mobileOpen && (
         <div
@@ -176,7 +196,10 @@ export default function DashboardLayout() {
           </svg>
         </div>
 
-        <nav className="flex-1 space-y-1 overflow-y-auto p-3">
+        {/* overscroll-contain: scrolling past the end of the nav must not hand
+            the gesture to the page behind the drawer, which is what made the
+            page slide out from under it. */}
+        <nav className="flex-1 space-y-1 overflow-y-auto overscroll-contain p-3">
           {items.map((item) => (
             <NavLink
               key={item.to}
@@ -226,9 +249,12 @@ export default function DashboardLayout() {
         <div
           ref={mainRef}
           onScroll={(e) => saveScroll(location.pathname, e.currentTarget.scrollTop)}
-          className="flex-1 overflow-auto"
+          // The page itself scrolls one way only. Anything genuinely wider than
+          // the frame - a table - carries its own horizontal scroller, so
+          // sideways movement belongs to that element and never to the page.
+          className="flex-1 overflow-y-auto overflow-x-hidden"
         >
-          <div key={location.pathname} className="w-full px-4 py-4 animate-page sm:px-6 sm:py-5">
+          <div key={location.pathname} className="w-full min-w-0 px-4 py-4 animate-page sm:px-6 sm:py-5">
             <Outlet />
           </div>
         </div>

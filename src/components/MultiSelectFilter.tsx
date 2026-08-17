@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Check, ChevronDown, Search } from "@/components/icons";
 
 /** At/above this many options the dropdown gains a search box + select-all. */
@@ -27,6 +27,9 @@ export function MultiSelectFilter({ label, options, selected, onChange, icon }: 
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLUListElement>(null);
   const optRefs = useRef<(HTMLLIElement | null)[]>([]);
+  const panelRef = useRef<HTMLDivElement>(null);
+  /** Pixels the open panel has to move to stay on screen - see the effect below. */
+  const [shift, setShift] = useState(0);
 
   const searchable = options.length >= SEARCH_THRESHOLD;
 
@@ -42,6 +45,38 @@ export function MultiSelectFilter({ label, options, selected, onChange, icon }: 
     const t = setTimeout(() => (searchable ? inputRef.current : listRef.current)?.focus(), 0);
     return () => clearTimeout(t);
   }, [open, searchable]);
+
+  /**
+   * Keep the popover on screen.
+   *
+   * <p>It hangs from the chip's own edge, and these chips wrap across the row -
+   * so a chip near the far side opens a panel that reaches past the window. The
+   * page does not scroll sideways (the shell forbids it), so what ran over used
+   * to be simply unreachable. Measured once on open, at rest, and nudged back
+   * inside; the offset lives on a wrapper so the panel keeps its own animation.
+   */
+  useLayoutEffect(() => {
+    if (!open) {
+      setShift(0);
+      return;
+    }
+    const place = () => {
+      const rect = panelRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      const EDGE = 8;
+      // rect is already shifted by whatever we applied last, so correct from it.
+      setShift((current) => {
+        const left = rect.left - current;
+        const right = rect.right - current;
+        if (left < EDGE) return EDGE - left;
+        if (right > window.innerWidth - EDGE) return window.innerWidth - EDGE - right;
+        return 0;
+      });
+    };
+    place();
+    window.addEventListener("resize", place);
+    return () => window.removeEventListener("resize", place);
+  }, [open, filtered.length]);
 
   useEffect(() => setHi(0), [q]);
   useEffect(() => {
@@ -116,7 +151,14 @@ export function MultiSelectFilter({ label, options, selected, onChange, icon }: 
       </button>
 
       {open && (
-        <div className="animate-scale-up absolute right-0 top-full z-30 mt-2 w-56 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xl">
+        <div
+          className="absolute right-0 top-full z-30 mt-2"
+          style={shift ? { transform: `translateX(${shift}px)` } : undefined}
+        >
+        <div
+          ref={panelRef}
+          className="animate-scale-up w-56 max-w-[calc(100vw-1rem)] overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xl"
+        >
           {searchable && (
             <>
               <div className="p-2">
@@ -202,6 +244,7 @@ export function MultiSelectFilter({ label, options, selected, onChange, icon }: 
               </button>
             </div>
           )}
+        </div>
         </div>
       )}
     </div>

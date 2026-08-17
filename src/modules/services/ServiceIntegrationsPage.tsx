@@ -76,8 +76,11 @@ export default function ServiceIntegrationsPage() {
         </p>
       </header>
 
-      {/* Tab bar */}
-      <div className="mt-5 flex w-fit flex-wrap gap-1 rounded-full border border-slate-200 bg-white p-1 shadow-sm">
+      {/* Tab bar. Two equal halves on a phone: sized to their own text, the long
+          "جهات اتصال Google" filled the row and pushed the short "واتساب" onto a
+          line above it, so the pair read as two mismatched controls instead of
+          one switch. From sm up they sit inline at their natural width. */}
+      <div className="mt-5 grid grid-cols-2 gap-1 rounded-full border border-slate-200 bg-white p-1 shadow-sm sm:flex sm:w-fit">
         <TabButton
           active={tab === "whatsapp"}
           onClick={() => setTab("whatsapp")}
@@ -117,12 +120,12 @@ function TabButton({
   return (
     <button
       onClick={onClick}
-      className={`flex items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold transition ${
+      className={`flex min-w-0 items-center justify-center gap-2 rounded-full px-3 py-2 text-sm font-semibold transition sm:px-4 ${
         active ? "bg-dark text-white" : "text-slate-600 hover:bg-slate-100"
       }`}
     >
-      {icon}
-      {label}
+      <span className="shrink-0">{icon}</span>
+      <span className="truncate">{label}</span>
       {/* Health dot: the tab says whether the service is working before it opens. */}
       <span
         className={`h-1.5 w-1.5 shrink-0 rounded-full ${TONE[health.tone]}`}
