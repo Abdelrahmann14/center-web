@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { ArrowRight, Users, Users2, Loader2 } from "lucide-react";
+import { ArrowRight, Users, Users2, Loader2 } from "@/components/icons";
 import { api } from "@/lib/api";
 import { PhotoUpload } from "@/components/PhotoUpload";
 import { Switch } from "@/components/ui";
@@ -10,11 +10,12 @@ interface AdminSummary {
   id: string;
   username: string;
   email: string;
+  /** WhatsApp number invoices are sent to; null until it is set. */
+  phone: string | null;
   active: boolean;
   student_count: number;
   assistant_count: number;
   photo: string | null;
-  google_sync_enabled: boolean;
   whatsapp_enabled: boolean;
 }
 interface AdminModule {
@@ -33,7 +34,6 @@ export default function TeacherDetailPage() {
   const [modules, setModules] = useState<AdminModule[]>([]);
   const [loading, setLoading] = useState(true);
   const [busyCode, setBusyCode] = useState<string | null>(null);
-  const [googleBusy, setGoogleBusy] = useState(false);
   const [waBusy, setWaBusy] = useState(false);
 
   useEffect(() => {
@@ -56,17 +56,6 @@ export default function TeacherDetailPage() {
       setModules((list) => list.map((x) => (x.code === m.code ? { ...x, enabled: !x.enabled } : x)));
     } finally {
       setBusyCode(null);
-    }
-  }
-
-  async function toggleGoogle() {
-    if (!teacher) return;
-    setGoogleBusy(true);
-    try {
-      await api.put(`/super/admins/${adminId}/google-sync`, { enabled: !teacher.google_sync_enabled });
-      setTeacher((t) => (t ? { ...t, google_sync_enabled: !t.google_sync_enabled } : t));
-    } finally {
-      setGoogleBusy(false);
     }
   }
 
@@ -106,6 +95,10 @@ export default function TeacherDetailPage() {
           <div className="text-left">
             <h1 className="text-xl font-bold text-slate-800">{teacher.username}</h1>
             <p className="text-sm text-slate-500" dir="ltr">{teacher.email}</p>
+            {/* Invoices are delivered here, so an unset number is worth saying. */}
+            <p className="text-sm text-slate-500" dir="ltr">
+              {teacher.phone ? `+${teacher.phone}` : <span dir="rtl">لا يوجد رقم واتساب</span>}
+            </p>
           </div>
         </div>
         <div className="mt-5 grid grid-cols-2 gap-3 sm:max-w-md">
@@ -117,19 +110,10 @@ export default function TeacherDetailPage() {
       {/* Integrations */}
       <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
         <h2 className="mb-4 font-bold text-slate-800">التكاملات</h2>
+        {/* Google Contacts is not here on purpose: it is free to run, so every
+            teacher has it. WhatsApp is the only integration with a real per-admin
+            cost, and so the only one with a switch. */}
         <div className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 px-4 py-3">
-          <div className="min-w-0">
-            <div className="font-semibold text-slate-800">مزامنة جهات اتصال Google</div>
-            <div className="mt-0.5 text-xs text-slate-400">
-              يسمح لهذا المدرّس بربط حساب Google وحفظ أرقام الطلاب وأولياء الأمور في جهات اتصاله تلقائيًا.
-            </div>
-          </div>
-          <div className="flex shrink-0 items-center gap-2">
-            {googleBusy && <Loader2 className="h-4 w-4 animate-spin text-slate-400" />}
-            <Switch checked={teacher.google_sync_enabled} onChange={toggleGoogle} disabled={googleBusy} />
-          </div>
-        </div>
-        <div className="mt-2 flex items-center justify-between gap-3 rounded-xl border border-slate-200 px-4 py-3">
           <div className="min-w-0">
             <div className="font-semibold text-slate-800">أرقام واتساب</div>
             <div className="mt-0.5 text-xs text-slate-400">
@@ -145,7 +129,10 @@ export default function TeacherDetailPage() {
 
       {/* Module toggles */}
       <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-        <h2 className="mb-4 font-bold text-slate-800">الوحدات والمزايا</h2>
+        <h2 className="font-bold text-slate-800">شاشات النظام</h2>
+        <p className="mb-4 mt-1 text-xs text-slate-400">
+          كل شاشة مفعّلة للمدرّس افتراضياً. إغلاق أي شاشة يخفيها عنه وعن مساعديه.
+        </p>
         <div className="space-y-2">
           {modules.map((m) => (
             <div key={m.code} className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 px-4 py-3">

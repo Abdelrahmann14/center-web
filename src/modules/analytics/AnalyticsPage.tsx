@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Users2, CalendarDays, MapPin, GraduationCap } from "lucide-react";
+import { Users2, CalendarDays, MapPin, GraduationCap } from "@/components/icons";
 import { api } from "@/lib/api";
 import { dayLabel } from "@/lib/days";
 import { LoaderBlock } from "@/components/PencilLoader";

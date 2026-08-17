@@ -1,6 +1,6 @@
 // The ports the SyncEngine depends on. Everything platform-specific lives behind
 // these interfaces so the engine itself is pure and identical on mobile
-// (expo-sqlite) and web (wa-sqlite / IndexedDB).
+// (expo-sqlite) and web (IndexedDB).
 import type {
   EntityChange,
   Mutation,
@@ -16,7 +16,7 @@ export interface StoredMutation extends Mutation {
 
 /**
  * Durable local storage: the outbox, the pull cursor, and the local mirror
- * tables. Implementations wrap a real SQLite database and MUST make
+ * tables. Implementations wrap a real database and MUST make
  * {@link applyChanges} atomic (one transaction) so a crash mid-apply never
  * leaves a half-written batch.
  */
@@ -32,6 +32,13 @@ export interface SyncStore {
 
   /** Record a failed attempt and when to retry it next (exponential backoff). */
   deferMutation(mutationId: string, attempts: number, nextRetryAt: number): Promise<void>;
+
+  /**
+   * Undo the optimistic local row of a mutation the server REFUSED, so a screen
+   * stops showing a save that never happened. Optional: a store that does not
+   * implement it keeps the stale row, which is the behaviour before this existed.
+   */
+  rejectMutation?(mutation: StoredMutation, reason: string): Promise<void>;
 
   /** Pending outbox size, for the status badge. */
   pendingCount(): Promise<number>;

@@ -2,26 +2,26 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import {
   Home,
-  GraduationCap,
+  Users,
   BookOpen,
-  ClipboardList,
-  CalendarCheck2,
-  FileText,
-  LineChart,
-  School,
+  ClipboardCheck,
+  ReceiptText,
+  FileQuestion,
+  ChartColumn,
+  CalendarRange,
   UserCog,
-  Blocks,
-  BellRing,
-  Power,
+  Megaphone,
+  Plug,
   Menu,
-} from "lucide-react";
+} from "@/components/icons";
 import { useAuth } from "@/auth/AuthContext";
-import sidebarLogo from "@/assets/sidebar-logo.jpeg";
+import sidebarLogo from "@/assets/sidebar-logo.png";
+import { AccountRow } from "@/components/AccountRow";
 import { ConfirmDialog } from "@/components/ui";
 import { PAGE_FRAME_ID } from "@/components/PencilLoader";
 import { getScroll, saveScroll } from "@/lib/pageState";
-import { SyncProvider } from "@/sync/SyncProvider";
 import { toast } from "@/components/ui/toast";
+import { SyncStatusPill } from "@/sync/SyncStatusPill";
 
 interface NavItem {
   to: string;
@@ -31,24 +31,47 @@ interface NavItem {
   perm?: string[];
   /** Admin-only screens (the workspace owner), never assistants. */
   adminOnly?: boolean;
+  /**
+   * Module the screen belongs to. Only needed for admin-only screens: a
+   * permission-gated screen already disappears when its module is switched off,
+   * because a disabled module stops granting its permissions. These carry no
+   * permission, so they check the module directly.
+   */
+  module?: string;
 }
 
+/**
+ * One icon per screen, and the SAME icon on the home launcher - an icon is a
+ * name, and two names for one screen means neither is ever learned. Each glyph
+ * is the screen's own noun rather than the category it belongs to: every screen
+ * here is "education", so a mortarboard says nothing about which one this is.
+ */
 const NAV: NavItem[] = [
   { to: "/", label: "الرئيسية", icon: <Home className="h-5 w-5" /> },
-  { to: "/students", label: "الطلاب", icon: <GraduationCap className="h-5 w-5" />, perm: ["STUDENT_VIEW"] },
+  // People, not a graduation: this screen is the roster.
+  { to: "/students", label: "الطلاب", icon: <Users className="h-5 w-5" />, perm: ["STUDENT_VIEW"] },
   { to: "/lectures", label: "الحصص", icon: <BookOpen className="h-5 w-5" />, perm: ["LESSON_VIEW"] },
-  { to: "/lesson-registration", label: "تسجيل الحصة", icon: <ClipboardList className="h-5 w-5" />, perm: ["REGISTRATION_ACCESS"] },
-  { to: "/offline-attendance", label: "الحضور", icon: <CalendarCheck2 className="h-5 w-5" />, perm: ["ATTENDANCE_ACCESS"] },
-  { to: "/exams", label: "الاختبارات", icon: <FileText className="h-5 w-5" />, perm: ["EXAM_CREATE", "EXAM_UPDATE", "EXAM_DELETE", "EXAM_PUBLISH"] },
-  { to: "/analytics", label: "الإحصائيات", icon: <LineChart className="h-5 w-5" />, adminOnly: true },
-  { to: "/grades", label: "المجموعات والسناتر", icon: <School className="h-5 w-5" />, adminOnly: true },
-  { to: "/users", label: "المساعدون", icon: <UserCog className="h-5 w-5" />, adminOnly: true },
-  { to: "/notifications", label: "الإشعارات والمراسلات", icon: <BellRing className="h-5 w-5" />, perm: ["NOTIFICATION_SEND"] },
-  { to: "/services", label: "تكامل الخدمات", icon: <Blocks className="h-5 w-5" />, adminOnly: true },
+  // The act is ticking names present, so the tick is the icon.
+  { to: "/lesson-registration", label: "تسجيل الحصة", icon: <ClipboardCheck className="h-5 w-5" />, perm: ["REGISTRATION_ACCESS"] },
+  // Invoices, not a wallet - it matches what the page actually draws.
+  { to: "/financials", label: "الحسابات", icon: <ReceiptText className="h-5 w-5" />, perm: ["FINANCE_VIEW"] },
+  // An exam is a question paper; this is the only "?" in the set.
+  { to: "/exams", label: "الاختبارات", icon: <FileQuestion className="h-5 w-5" />, perm: ["EXAM_CREATE", "EXAM_UPDATE", "EXAM_DELETE", "EXAM_PUBLISH"] },
+  // Columns, not a trend line: the data is per-lesson counts, not a time series.
+  { to: "/analytics", label: "الإحصائيات", icon: <ChartColumn className="h-5 w-5" />, adminOnly: true, module: "ANALYTICS" },
+  // A group IS a weekly day-and-time slot - that is its database key, and this
+  // is the screen that sets it. The range reads as the week, against the clock
+  // used on the home page for today alone.
+  { to: "/grades", label: "المجموعات والسناتر", icon: <CalendarRange className="h-5 w-5" />, adminOnly: true, module: "GROUPS" },
+  { to: "/users", label: "المساعدون", icon: <UserCog className="h-5 w-5" />, adminOnly: true, module: "ASSISTANTS" },
+  // WhatsApp messaging: manual sends, the automated messages, and their log.
+  { to: "/notifications", label: "الرسائل", icon: <Megaphone className="h-5 w-5" />, perm: ["NOTIFICATION_SEND"] },
+  // Connections to the outside. Blocks read as "modules", which these are not.
+  { to: "/services", label: "الخدمات", icon: <Plug className="h-5 w-5" />, adminOnly: true },
 ];
 
 export default function DashboardLayout() {
-  const { user, effectiveRole, logout, can } = useAuth();
+  const { user, effectiveRole, logout, can, hasModule } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const mainRef = useRef<HTMLDivElement>(null);
@@ -65,10 +88,10 @@ export default function DashboardLayout() {
   const offlineToastId = useRef<string | null>(null);
   useEffect(() => {
     function onOffline() {
-      offlineToastId.current = toast.error("انقطع الاتصال بالإنترنت", {
-        title: "لا يوجد اتصال",
-        duration: Infinity,
-      });
+      // Auto-dismisses after 5s like any other toast; the sidebar sync pill
+      // carries the persistent offline state, so the toast is a brief heads-up,
+      // not a banner.
+      offlineToastId.current = toast.error("لا يوجد اتصال", { duration: 5000 });
     }
     function onOnline() {
       if (offlineToastId.current !== null) {
@@ -101,13 +124,13 @@ export default function DashboardLayout() {
   // relevant permission - so the admin sees every workspace screen (they hold
   // all workspace permissions), while each assistant sees exactly the screens
   // the admin granted them. Service Integrations stays admin-only.
-  const items = NAV.filter((n) =>
-    n.adminOnly ? effectiveRole === "admin" : n.perm ? n.perm.some(can) : true
-  );
+  const items = NAV.filter((n) => {
+    if (n.module && !hasModule(n.module)) return false;
+    return n.adminOnly ? effectiveRole === "admin" : n.perm ? n.perm.some(can) : true;
+  });
 
   return (
-    <SyncProvider>
-    <div className="flex h-screen gap-3 overflow-hidden bg-dark p-3">
+    <div className="flex h-screen gap-2 overflow-hidden bg-dark p-2 sm:gap-3 sm:p-3">
       {/* Dimmed backdrop behind the mobile drawer. */}
       {mobileOpen && (
         <div
@@ -117,23 +140,40 @@ export default function DashboardLayout() {
       )}
 
       <aside
-        className={`z-40 flex w-64 flex-col overflow-hidden rounded-[20px] bg-dark text-slate-200 transition-transform duration-200 max-lg:fixed max-lg:inset-y-3 max-lg:right-3 max-lg:shadow-2xl lg:static lg:translate-x-0 ${
+        className={`z-40 flex w-64 flex-col overflow-hidden rounded-[20px] bg-dark text-slate-200 transition-transform duration-200 max-lg:fixed max-lg:inset-y-2 max-lg:right-2 sm:max-lg:inset-y-3 sm:max-lg:right-3 max-lg:shadow-2xl lg:static lg:translate-x-0 ${
           mobileOpen ? "max-lg:translate-x-0" : "max-lg:translate-x-[calc(100%+0.75rem)]"
         }`}
       >
-        <div className="flex h-18 items-center px-3">
-          {/* The logo art is white-on-black in a JPEG (no alpha channel), so
-              `screen` blending drops its black backdrop onto the sidebar. The
-              source is square with the mark in a middle band, so this box keeps
-              the mark's own ~7:4 ratio - `cover` then trims only dead black and
-              the whole mark stays visible. Width drives the drawn size. */}
+        <div className="flex h-18 items-center justify-center px-3">
+          {/* Transparent PNG (white wordmark + the colored reading-girl mark), so
+              it sits on the dark sidebar as-is - no blend tricks.
+
+              The file is cropped to the artwork itself. It used to be the mark
+              floating in a 1080x1080 canvas that was more than half empty, drawn
+              into a fixed 112x64 box with `cover` - so the transparent margin ate
+              the box and the wordmark landed at ~87px wide. Now the height sets
+              the size and the width follows the real aspect ratio, with no crop,
+              centred in the sidebar rather than pinned to its edge. */}
           <img
             src={sidebarLogo}
             alt="سنتر"
-            /* contrast crushes the JPEG's near-black compression noise back to
-               black so `screen` blending doesn't reveal it as a grey haze. */
-            className="h-16 w-28 shrink-0 object-cover contrast-125 mix-blend-screen"
+            className="h-12 w-auto shrink-0"
           />
+        </div>
+
+        {/* A simple wavy line dividing the logo from the nav. */}
+        <div className="mb-2 px-3" aria-hidden>
+          <svg
+            viewBox="0 0 240 8"
+            preserveAspectRatio="none"
+            className="block h-2 w-full text-white/25"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth={1.5}
+            strokeLinecap="round"
+          >
+            <path d="M0 4 Q 15 0 30 4 T 60 4 T 90 4 T 120 4 T 150 4 T 180 4 T 210 4 T 240 4" />
+          </svg>
         </div>
 
         <nav className="flex-1 space-y-1 overflow-y-auto p-3">
@@ -156,24 +196,12 @@ export default function DashboardLayout() {
           ))}
         </nav>
 
-        <div className="border-t border-white/10 p-3">
-          {/* Account row: identity is static; only the sign-out button reacts. */}
-          <div className="flex items-center gap-3 px-2 py-2">
-            <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-accent/20 text-sm font-bold text-white">
-              {user?.username?.trim()?.[0] ?? "؟"}
-            </span>
-            <span className="min-w-0 flex-1 truncate text-sm font-medium text-slate-200">
-              {user?.username}
-            </span>
-            <button
-              onClick={() => setConfirmLogout(true)}
-              title="تسجيل الخروج"
-              aria-label="تسجيل الخروج"
-              className="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-rose-400 transition hover:bg-white/10 hover:text-rose-300"
-            >
-              <Power className="h-5 w-5" />
-            </button>
-          </div>
+        <div className="space-y-2 border-t border-white/10 p-2">
+          {/* Offline sync state: quiet when synced, speaks up when offline or
+              while writes are still queued. */}
+          <SyncStatusPill />
+          {/* Who is signed in, with sign-out right next to them. */}
+          <AccountRow onLogout={() => setConfirmLogout(true)} />
         </div>
       </aside>
 
@@ -200,7 +228,7 @@ export default function DashboardLayout() {
           onScroll={(e) => saveScroll(location.pathname, e.currentTarget.scrollTop)}
           className="flex-1 overflow-auto"
         >
-          <div key={location.pathname} className="w-full px-6 py-5 animate-page">
+          <div key={location.pathname} className="w-full px-4 py-4 animate-page sm:px-6 sm:py-5">
             <Outlet />
           </div>
         </div>
@@ -217,6 +245,5 @@ export default function DashboardLayout() {
         />
       )}
     </div>
-    </SyncProvider>
   );
 }

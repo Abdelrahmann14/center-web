@@ -2,7 +2,7 @@
 // score and stage auto-fill from it (still editable); on save the name/score are
 // written back to the lesson server-side. Creating then hands off to the builder.
 import { useMemo, useState } from "react";
-import { Loader2 } from "lucide-react";
+import { Loader2 } from "@/components/icons";
 import { api, ApiError } from "@/lib/api";
 import { useToast } from "@/components/Toast";
 import { Field, FormNotice, Modal, Select, inputClass } from "@/components/ui";

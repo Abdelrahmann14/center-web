@@ -26,6 +26,8 @@ export interface CurrentUser {
   permissions?: string[];
   /** Codes of the platform modules enabled for this principal's workspace. */
   modules?: string[];
+  /** Profile photo as a base64 data URL, or null/absent when none is set. */
+  photo?: string | null;
 }
 
 /**

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { GraduationCap, Users2, HeartHandshake } from "lucide-react";
+import { GraduationCap, Users2, HeartHandshake } from "@/components/icons";
 import TeachersPage from "./TeachersPage";
 import StudentsAdminPage from "./StudentsAdminPage";
 import ParentsAdminPage from "./ParentsAdminPage";

@@ -1,7 +1,7 @@
 // Legacy toast shim. The real toast system now lives in
 // `@/components/ui/toast` (react-hot-toast, RTL, project palette). This file is
 // kept only so the existing `ToastProvider` / `useToast()` call sites across the
-// app keep working unchanged — both now delegate to the single hot-toast engine,
+// app keep working unchanged - both now delegate to the single hot-toast engine,
 // so the whole app shows one consistent toast.
 import { type ReactNode } from "react";
 import { toast } from "@/components/ui/toast";

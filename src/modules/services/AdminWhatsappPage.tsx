@@ -1,12 +1,12 @@
 import { useEffect, useState } from "react";
-import { ShieldAlert } from "lucide-react";
+import { ShieldAlert } from "@/components/icons";
 import { api } from "@/lib/api";
 import { LoaderBlock } from "@/components/PencilLoader";
 import { WhatsappService } from "@/modules/superadmin/ServicesPage";
 
-// The WhatsApp tab body inside "تكامل الخدمات", gated by the super-admin enable
-// flag. When disabled it shows a notice instead of the (shared) WhatsApp UI. The
-// tab strip above already labels the section, so no page heading here.
+// The WhatsApp panel inside "الخدمات", gated by the super-admin enable flag.
+// When disabled it shows a notice instead of the (shared) WhatsApp UI. The
+// service card above already labels the section, so no page heading here.
 export default function AdminWhatsappPage() {
   const [enabled, setEnabled] = useState<boolean | null>(null);
 

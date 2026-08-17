@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Users, Pencil, Loader2 } from "lucide-react";
+import { Users, Pencil, Loader2 } from "@/components/icons";
 import { api, ApiError, getAllPages } from "@/lib/api";
 import { toast } from "@/components/ui/toast";
 import { Modal, Field, Select, ConfirmDialog, FormNotice, requiredArabic, inputClass } from "@/components/ui";
@@ -315,7 +315,7 @@ function StudentEditModal({ studentId, onClose, onSaved }: { studentId: string; 
             <Field label="المدرسة">
               <input value={school} onChange={(e) => setSchool(e.target.value)} className={inputClass} />
             </Field>
-            <Field label="المدينة">
+            <Field label="المنطقة السكنية">
               <input value={city} onChange={(e) => setCity(e.target.value)} className={inputClass} />
             </Field>
             <Field label="تاريخ الميلاد">

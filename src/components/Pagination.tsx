@@ -1,6 +1,6 @@
 // The app-wide pagination control (extracted from the Students page). RTL: the
 // right chevron goes to the previous page, the left chevron to the next.
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import { ChevronLeft, ChevronRight } from "@/components/icons";
 
 /** Page window: ±1 around current, first/last always shown, gaps as "…". */
 function pageList(current: number, total: number): (number | "…")[] {

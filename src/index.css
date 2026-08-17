@@ -1,4 +1,4 @@
-@import url("https://fonts.googleapis.com/css2?family=Noto+Kufi+Arabic:wght@400;500;600;700&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Noto+Kufi+Arabic:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap");
 @import "tailwindcss";
 /* Brand color tokens (bg-accent, bg-accent-hover, bg-dark, …). Single source of
    truth lives in @center/design-tokens/tokens.js; theme.css is generated.
@@ -19,6 +19,47 @@ body {
   margin: 0;
   font-family: "Noto Kufi Arabic", system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
+}
+
+/* A distinct, clean face for the live clock / time digits - a geometric,
+   tabular Latin font, deliberately different from the system's Arabic figures
+   so the header clock reads as a clock. */
+.font-clock {
+  font-family: "Space Grotesk", ui-monospace, "Segoe UI", system-ui, sans-serif;
+  font-feature-settings: "tnum" 1;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Money figures on an invoice. Same face as the clock, for the same reason: a
+   ledger column has to align digit-for-digit down the page, which Kufi figures
+   do not do. Named for the job so the clock can change without moving money. */
+.font-ledger {
+  font-family: "Space Grotesk", ui-monospace, "Segoe UI", system-ui, sans-serif;
+  font-feature-settings: "tnum" 1;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The invoice perforation. Two notches punched into the card's side edges turn
+   the required divider between lesson data and money into a tear line, which is
+   what a receipt actually looks like. The notch is filled with the page ground,
+   so it reads as a hole rather than a dot. */
+.invoice-perf::before,
+.invoice-perf::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  width: 0.875rem;
+  height: 0.875rem;
+  border-radius: 9999px;
+  /* slate-50: the ground the invoice strip is laid on. */
+  background: #f8fafc;
+  transform: translateY(-50%);
+}
+.invoice-perf::before {
+  right: -0.4375rem;
+}
+.invoice-perf::after {
+  left: -0.4375rem;
 }
 
 /* Every interactive element shows the hand cursor on hover; disabled controls

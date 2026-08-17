@@ -1,6 +1,6 @@
 // Global toast system (web), built on react-hot-toast using the library's
 // DEFAULT toast look (clean white pill, built-in success/error/loading icons and
-// spring animation) — only adapted for Arabic RTL, the project font, and
+// spring animation) - only adapted for Arabic RTL, the project font, and
 // top-center placement. Warning/info reuse the generic toast with a coloured
 // lucide icon since the library ships no native variant for them.
 //
@@ -12,7 +12,7 @@
 
 import type { ReactElement } from "react";
 import hotToast, { Toaster as HotToaster } from "react-hot-toast";
-import { Info, TriangleAlert } from "lucide-react";
+import { Info, TriangleAlert } from "@/components/icons";
 
 type ToastId = string;
 
@@ -35,24 +35,50 @@ function content(message: string, title?: string): string | ReactElement {
   );
 }
 
-const opts = (o: ToastOptions) => (o.duration ? { duration: o.duration } : undefined);
+// One accent colour per variant. It tints the icon only, so the kind of toast
+// reads from the glyph without a coloured stripe on the pill.
+const ACCENT = {
+  success: "#22c55e",
+  error: "#f43f5e",
+  warning: "#f59e0b",
+  info: "#38bdf8",
+} as const;
+
+// Per-toast options: just the caller's duration. The pill keeps its uniform 1px
+// border on every side - no coloured edge stripe.
+function variantOpts(_kind: keyof typeof ACCENT, o: ToastOptions) {
+  return o.duration ? { duration: o.duration } : {};
+}
+
+// Brighter than the library defaults so the built-in check/cross stays legible
+// against the dark pill; the secondary (glyph interior) sits on that dark ground.
+const iconTheme = (kind: "success" | "error") => ({
+  primary: ACCENT[kind],
+  secondary: "#0f172a",
+});
 
 export const toast = {
   success: (message: string, o: ToastOptions = {}) =>
-    hotToast.success(content(message, o.title), opts(o)),
+    hotToast.success(content(message, o.title), {
+      ...variantOpts("success", o),
+      iconTheme: iconTheme("success"),
+    }),
   error: (message: string, o: ToastOptions = {}) =>
-    hotToast.error(content(message, o.title), opts(o)),
+    hotToast.error(content(message, o.title), {
+      ...variantOpts("error", o),
+      iconTheme: iconTheme("error"),
+    }),
   loading: (message: string, o: ToastOptions = {}) =>
-    hotToast.loading(content(message, o.title), opts(o)),
+    hotToast.loading(content(message, o.title), o.duration ? { duration: o.duration } : undefined),
   warning: (message: string, o: ToastOptions = {}) =>
     hotToast(content(message, o.title), {
       icon: <TriangleAlert className="h-5 w-5 text-amber-500" />,
-      ...opts(o),
+      ...variantOpts("warning", o),
     }),
   info: (message: string, o: ToastOptions = {}) =>
     hotToast(content(message, o.title), {
-      icon: <Info className="h-5 w-5 text-accent" />,
-      ...opts(o),
+      icon: <Info className="h-5 w-5 text-sky-400" />,
+      ...variantOpts("info", o),
     }),
   dismiss: (id?: ToastId) => hotToast.dismiss(id),
 };
@@ -73,7 +99,8 @@ export function ToastViewport({
       gutter={8}
       containerStyle={{ direction: "ltr" }}
       toastOptions={{
-        duration: 4000,
+        // Every toast auto-dismisses after 5s unless the caller overrides it.
+        duration: 5000,
         style: {
           direction: "rtl",
           fontFamily: "inherit",

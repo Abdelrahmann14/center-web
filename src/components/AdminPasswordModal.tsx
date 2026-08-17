@@ -1,11 +1,11 @@
 import { useState } from "react";
-import { Loader2, ShieldCheck } from "lucide-react";
+import { Loader2, ShieldCheck } from "@/components/icons";
 import { api, ApiError } from "@/lib/api";
 import { Modal, Field, FormNotice, inputClass } from "@/components/ui";
 
 /** Prompts for the admin password and verifies it before allowing a sensitive action. */
 export function AdminPasswordModal({
-  title = "تأكيد كلمة مرور المدير",
+  title = "تأكيد كلمة مرور المدرّس",
   message,
   onConfirmed,
   onClose,
@@ -60,7 +60,7 @@ export function AdminPasswordModal({
       }
     >
       <form id="admin-pw" onSubmit={handleSubmit} className="space-y-4">
-        <Field label="كلمة مرور المدير">
+        <Field label="كلمة مرور المدرّس">
           <input
             type="password"
             value={password}

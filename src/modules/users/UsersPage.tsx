@@ -8,7 +8,9 @@ import {
   ShieldCheck,
   User as UserIcon,
   KeyRound,
-} from "lucide-react";
+  ClipboardCheck,
+  CalendarDays,
+} from "@/components/icons";
 import { LoginNameField } from "@/components/LoginNameField";
 import { localPartOf } from "@/lib/useEmailAvailability";
 import { api, ApiError } from "@/lib/api";
@@ -29,6 +31,17 @@ interface Assistant {
   created_at: string;
   /** Arabic names of the permissions the admin granted this assistant. */
   permissions: string[];
+  /** How many lesson sessions this assistant has been marked present at. */
+  attendance_count: number;
+}
+
+/** One row in an assistant's attendance log. */
+interface AttendanceRecord {
+  session_date: string;
+  lecture_name: string;
+  group_label: string;
+  center_name: string | null;
+  grade: string | null;
 }
 
 export default function UsersPage() {
@@ -38,6 +51,7 @@ export default function UsersPage() {
   const [showForm, setShowForm] = useState(false);
   const [editUser, setEditUser] = useState<Assistant | null>(null);
   const [permsFor, setPermsFor] = useState<Assistant | null>(null);
+  const [attendanceFor, setAttendanceFor] = useState<Assistant | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<Assistant | null>(null);
 
   async function load() {
@@ -80,7 +94,7 @@ export default function UsersPage() {
       {loading ? (
         <LoaderBlock />
       ) : (
-        <div className="mt-5 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+        <div className="mt-5 overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-sm">
           <table className="w-full text-right text-sm">
             <thead className={THEAD}>
               <tr>
@@ -88,6 +102,7 @@ export default function UsersPage() {
                 <th className="px-5 py-3 font-medium">اسم الدخول</th>
                 <th className="px-5 py-3 font-medium">الهاتف</th>
                 <th className="px-5 py-3 font-medium">النوع</th>
+                <th className="px-5 py-3 font-medium">الحضور</th>
                 <th className="px-5 py-3 font-medium">الصلاحيات</th>
                 <th className="px-5 py-3 font-medium">تاريخ الإنشاء</th>
                 <th className="px-5 py-3 font-medium"></th>
@@ -110,6 +125,22 @@ export default function UsersPage() {
                       <span className="inline-flex items-center gap-1.5 rounded-lg bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600">
                         <UserIcon className="h-3.5 w-3.5" /> مساعد
                       </span>
+                    )}
+                  </td>
+                  {/* Lessons this assistant was marked present at; the number opens
+                      the log. Admins are never marked, so they show a dash. */}
+                  <td className="px-5 py-3.5">
+                    {u.role === "admin" ? (
+                      <span className="text-xs text-slate-400">—</span>
+                    ) : (
+                      <button
+                        onClick={() => setAttendanceFor(u)}
+                        title="عرض سجل الحضور"
+                        className="inline-flex items-center gap-1.5 rounded-lg bg-accent/10 px-2.5 py-1 text-sm font-semibold text-accent transition hover:bg-accent/20"
+                      >
+                        <ClipboardCheck className="h-3.5 w-3.5" />
+                        {u.attendance_count.toLocaleString("ar-EG")}
+                      </button>
                     )}
                   </td>
                   {/* What this assistant may actually do, straight from the grants. */}
@@ -159,7 +190,7 @@ export default function UsersPage() {
               ))}
               {rows.length === 0 && (
                 <tr>
-                  <td colSpan={7} className="px-5 py-10 text-center text-slate-400">
+                  <td colSpan={8} className="px-5 py-10 text-center text-slate-400">
                     <Users2 className="mx-auto mb-2 h-10 w-10 text-slate-300" />
                     لا يوجد مساعدون
                   </td>
@@ -192,6 +223,10 @@ export default function UsersPage() {
       )}
 
       {permsFor && <PermissionsModal user={permsFor} onClose={() => setPermsFor(null)} />}
+
+      {attendanceFor && (
+        <AttendanceLogModal user={attendanceFor} onClose={() => setAttendanceFor(null)} />
+      )}
 
       {confirmDelete && (
         <ConfirmDialog
@@ -488,6 +523,81 @@ function PermissionsModal({ user, onClose }: { user: Assistant; onClose: () => v
             );
           })}
           <FormNotice message={error} />
+        </div>
+      )}
+    </Modal>
+  );
+}
+
+const LOG_DATE = new Intl.DateTimeFormat("ar-EG", {
+  weekday: "long",
+  day: "numeric",
+  month: "long",
+  year: "numeric",
+});
+
+/**
+ * One assistant's attendance log: every lesson session they were marked present
+ * at, newest first. Read-only - attendance is set from the lesson invoice, this
+ * only reports it.
+ */
+function AttendanceLogModal({ user, onClose }: { user: Assistant; onClose: () => void }) {
+  const [rows, setRows] = useState<AttendanceRecord[] | null>(null);
+
+  useEffect(() => {
+    api
+      .get<AttendanceRecord[]>(`/finance/assistants/${user.id}/attendance`)
+      .then(setRows)
+      .catch(() => setRows([]));
+  }, [user.id]);
+
+  return (
+    <Modal
+      title="سجل الحضور"
+      subtitle={`الحصص التي حضرها ${user.username}`}
+      size="lg"
+      onClose={onClose}
+    >
+      {rows === null ? (
+        <LoaderBlock />
+      ) : rows.length === 0 ? (
+        <div className="rounded-2xl border border-dashed border-slate-300 py-10 text-center">
+          <ClipboardCheck className="mx-auto mb-2 h-8 w-8 text-slate-300" />
+          <p className="text-sm text-slate-500">لم يُسجَّل حضور هذا المساعد في أي حصة بعد</p>
+        </div>
+      ) : (
+        <div className="overflow-hidden rounded-2xl border border-slate-200">
+          <table className="w-full text-right text-sm">
+            <thead className={THEAD}>
+              <tr>
+                <th className="px-4 py-2.5 font-medium">التاريخ</th>
+                <th className="px-4 py-2.5 font-medium">الحصة</th>
+                <th className="px-4 py-2.5 font-medium">المجموعة</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {rows.map((r, i) => (
+                <tr key={i} className="align-top">
+                  <td className="px-4 py-2.5 text-slate-600">
+                    <span className="flex items-center gap-1.5">
+                      <CalendarDays className="h-3.5 w-3.5 text-slate-400" />
+                      {LOG_DATE.format(new Date(`${r.session_date}T00:00:00`))}
+                    </span>
+                  </td>
+                  <td className="px-4 py-2.5 font-medium text-slate-800">
+                    {r.lecture_name}
+                    {r.grade ? <span className="mr-1 text-xs text-slate-400">· {r.grade}</span> : null}
+                  </td>
+                  <td className="px-4 py-2.5 text-slate-600">
+                    {r.group_label}
+                    {r.center_name ? (
+                      <span className="block text-xs text-slate-400">{r.center_name}</span>
+                    ) : null}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       )}
     </Modal>

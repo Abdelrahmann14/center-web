@@ -1,7 +1,7 @@
 // Super-admin profile-photo control: shows the avatar with an upload/remove
 // action. Reads the file as a base64 data URL and PUTs it to the user's account.
 import { useRef, useState } from "react";
-import { Camera, Loader2, Trash2 } from "lucide-react";
+import { Camera, Loader2, Trash2 } from "@/components/icons";
 import { api, ApiError } from "@/lib/api";
 import { Avatar } from "@/components/Avatar";
 import { CircularProgress } from "@/components/ui/circular-progress";

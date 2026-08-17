@@ -1,66 +1,87 @@
 import { useState } from "react";
-import { Loader2, LogIn } from "lucide-react";
+import { Loader2, LogIn } from "@/components/icons";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/auth/AuthContext";
 import { Logo } from "@/components/Logo";
-import { Field, FormNotice, inputClass, requiredArabic } from "@/components/ui";
+import { Field, FieldError, inputClass } from "@/components/ui";
+import { toast } from "@/components/ui/toast";
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export default function LoginPage() {
   const { login } = useAuth();
   const navigate = useNavigate();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [error, setError] = useState("");
+  const [attempted, setAttempted] = useState(false);
   const [loading, setLoading] = useState(false);
+
+  // Same reveal rule as the rest of the system (LectureForm/StudentForm):
+  // "مطلوب" and format errors wait for a submit attempt, then live in the
+  // floating FieldError bubble above the field. They clear live as the value
+  // becomes valid.
+  const emailErr = !attempted
+    ? null
+    : !email.trim()
+      ? "مطلوب"
+      : !EMAIL_RE.test(email.trim())
+        ? "بريد إلكتروني غير صحيح"
+        : null;
+  const pwErr = attempted && !password ? "مطلوب" : null;
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    setError("");
+    setAttempted(true);
+    if (!email.trim() || !EMAIL_RE.test(email.trim()) || !password) return;
+
     setLoading(true);
     try {
       await login(email.trim(), password);
       navigate("/", { replace: true });
     } catch (err) {
-      setError(err instanceof Error ? err.message : "تعذّر تسجيل الدخول");
+      // A rejected login is about the attempt (wrong name/password, server
+      // down), not one field - so it surfaces as a toast.
+      toast.error(err instanceof Error ? err.message : "تعذّر تسجيل الدخول");
     } finally {
       setLoading(false);
     }
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-slate-100 p-4">
+    <div className="flex min-h-screen items-center justify-center bg-slate-200 p-4">
       <div className="w-full max-w-sm animate-page rounded-2xl border border-slate-200 bg-white p-8 shadow-xl">
         <div className="mb-6 flex flex-col items-center gap-3">
           <Logo className="h-44 w-auto max-w-[360px]" />
           <p className="text-sm text-slate-500">تسجيل الدخول إلى النظام</p>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-5">
+        {/* noValidate: the system owns validation, so the browser bubble stays out. */}
+        <form onSubmit={handleSubmit} noValidate className="space-y-5">
           <Field label="البريد الإلكتروني">
-            <input
-              type="email"
-              dir="ltr"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              required
-              {...requiredArabic}
-              autoFocus
-              className={inputClass}
-            />
+            <div className="relative">
+              <FieldError message={emailErr} />
+              <input
+                type="email"
+                dir="ltr"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                autoFocus
+                className={inputClass}
+              />
+            </div>
           </Field>
           <Field label="كلمة المرور">
-            <input
-              type="password"
-              dir="ltr"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required
-              {...requiredArabic}
-              className={inputClass}
-            />
+            <div className="relative">
+              <FieldError message={pwErr} />
+              <input
+                type="password"
+                dir="ltr"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                className={inputClass}
+              />
+            </div>
           </Field>
-
-          <FormNotice message={error} />
 
           <button
             type="submit"

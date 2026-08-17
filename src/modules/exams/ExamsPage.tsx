@@ -3,7 +3,7 @@
 // opening it. Admin-only (route + nav gate this).
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Award, CalendarClock, CheckCircle2, Clock, Copy, FileText, KeyRound, ListChecks, Loader2, Pencil, Plus, Send, Users } from "lucide-react";
+import { Award, CalendarClock, CheckCircle2, Clock, Copy, FileText, KeyRound, ListChecks, Loader2, Pencil, Plus, Send, Users } from "@/components/icons";
 import { DeleteButton } from "@/components/DeleteButton";
 import { api, ApiError } from "@/lib/api";
 import { cachedGet, invalidate, useCachedGet } from "@/lib/dataCache";

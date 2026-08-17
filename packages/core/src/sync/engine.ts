@@ -19,15 +19,40 @@ export interface SyncEngineOptions {
   /** First retry delay; doubles per attempt up to {@link maxBackoffMs}. */
   baseBackoffMs?: number;
   maxBackoffMs?: number;
+  /**
+   * How often to run a pass on its own, in milliseconds. 0 disables it.
+   *
+   * <p>Without this the engine only ever syncs when it is started, when the
+   * connection returns, or when this device writes something - so a change made
+   * on ANOTHER device would sit on the server until one of those happened to
+   * occur. "Stays synchronized whenever there is a connection" needs a heartbeat,
+   * not just events.
+   */
+  pollMs?: number;
   /** Notified on every status transition, for the UI badge. */
   onStatus?: (status: SyncStatus) => void;
+  /**
+   * Notified once per mutation the server REFUSED. A rejection is final - it is
+   * the one outcome the user has to hear about, because the write they made is
+   * gone and nothing will retry it.
+   */
+  onRejected?: (mutation: StoredMutation, message: string) => void;
 }
 
 const DEFAULTS = {
   pushBatch: 50,
-  pullBatch: 200,
+  // Small on purpose. The server resolves one row per entry with its own query,
+  // so a page costs page-size round trips to the database - and the cursor only
+  // advances when a page lands. A big page means a long request that risks
+  // timing out and losing ALL of its work; a small one turns the catch-up into
+  // steady progress that survives an interruption.
+  pullBatch: 50,
   baseBackoffMs: 2000,
   maxBackoffMs: 5 * 60 * 1000,
+  // Often enough that another device's edit shows up while someone is still
+  // looking at the screen; rare enough to be nothing on a pull that finds
+  // nothing, which is one small request against a cursor.
+  pollMs: 30 * 1000,
 };
 
 export class SyncEngine {
@@ -37,6 +62,7 @@ export class SyncEngine {
   private readonly clock: Clock;
   private readonly cfg: typeof DEFAULTS;
   private readonly onStatus?: (status: SyncStatus) => void;
+  private readonly onRejected?: (mutation: StoredMutation, message: string) => void;
 
   // Single-flight: `running` is the mutex; `queued` remembers that a trigger
   // arrived mid-pass so exactly one more pass runs after the current one.
@@ -44,6 +70,7 @@ export class SyncEngine {
   private queued = false;
   private started = false;
   private unsubscribe: (() => void) | null = null;
+  private heartbeat: ReturnType<typeof setInterval> | null = null;
   private status: SyncStatus;
 
   constructor(opts: SyncEngineOptions) {
@@ -56,8 +83,10 @@ export class SyncEngine {
       pullBatch: opts.pullBatch ?? DEFAULTS.pullBatch,
       baseBackoffMs: opts.baseBackoffMs ?? DEFAULTS.baseBackoffMs,
       maxBackoffMs: opts.maxBackoffMs ?? DEFAULTS.maxBackoffMs,
+      pollMs: opts.pollMs ?? DEFAULTS.pollMs,
     };
     this.onStatus = opts.onStatus;
+    this.onRejected = opts.onRejected;
     this.status = initialStatus(this.network.isOnline());
   }
 
@@ -69,12 +98,21 @@ export class SyncEngine {
       this.patch({ online, phase: online ? this.status.phase : "offline" });
       if (online) void this.sync();
     });
+    // `sync()` is single-flight and returns immediately when offline, so a tick
+    // that lands on a running pass or a dead line costs nothing.
+    if (this.cfg.pollMs > 0) {
+      this.heartbeat = setInterval(() => void this.sync(), this.cfg.pollMs);
+    }
     void this.sync();
   }
 
   stop(): void {
     this.unsubscribe?.();
     this.unsubscribe = null;
+    if (this.heartbeat !== null) {
+      clearInterval(this.heartbeat);
+      this.heartbeat = null;
+    }
     this.started = false;
   }
 
@@ -85,6 +123,19 @@ export class SyncEngine {
   /** Queue a local write and kick a sync. The write is durable before we return. */
   async enqueue(mutation: Mutation): Promise<void> {
     await this.store.enqueue(mutation);
+    this.patch({ pending: await this.store.pendingCount() });
+    void this.sync();
+  }
+
+  /**
+   * Refresh the pending badge and kick a sync after the caller has ALREADY
+   * written to the store itself (e.g. an optimistic mirror row plus its outbox
+   * mutation, committed together in one atomic store transaction). Use this
+   * instead of {@link enqueue} when the outbox write has to be atomic with a
+   * local mirror write - the store owns that transaction, and this just tells
+   * the engine a write happened so the badge and the next pass stay in step.
+   */
+  async notifyLocalWrite(): Promise<void> {
     this.patch({ pending: await this.store.pendingCount() });
     void this.sync();
   }
@@ -104,13 +155,18 @@ export class SyncEngine {
       return;
     }
     this.running = true;
-    this.patch({ phase: "syncing", lastError: null });
+    // `lastError` is deliberately NOT cleared here. With a heartbeat running,
+    // clearing it on every attempt wiped the reason a moment after it appeared,
+    // so a sync failing over and over looked like one that was merely busy.
+    // Only success clears it.
+    this.patch({ phase: "syncing" });
     try {
       await this.pushDrain();
       await this.pullDrain();
       this.patch({
         phase: "synced",
         lastSyncedAt: this.clock.now(),
+        lastError: null,
         pending: await this.store.pendingCount(),
       });
     } catch (err) {
@@ -140,9 +196,19 @@ export class SyncEngine {
       for (const r of res.results) {
         // applied / duplicate / conflict all mean "done, drop it": the server is
         // authoritative and the pull that follows brings the winning row down.
-        // Only an outright rejection is dropped with its reason surfaced.
-        if (r.outcome === "rejected") {
-          this.patch({ lastError: r.message ?? "rejected" });
+        // A rejection is different: nothing is coming to correct the optimistic
+        // row, so the local row is rolled back and the reason is announced. It
+        // is dropped from the outbox either way - the server refused it, and
+        // replaying a refusal only produces the same refusal.
+        const rejected = r.outcome === "rejected";
+        const mutation = byId.get(r.mutationId);
+        if (rejected) {
+          const message = r.message ?? "رُفضت العملية";
+          this.patch({ lastError: message });
+          if (mutation) {
+            await this.store.rejectMutation?.(mutation, message).catch(() => {});
+            this.onRejected?.(mutation, message);
+          }
         }
         await this.store.ackMutation(r.mutationId);
         byId.delete(r.mutationId);

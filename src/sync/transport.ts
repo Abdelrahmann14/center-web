@@ -1,5 +1,6 @@
-// The SyncTransport port over the web HTTP client (which already carries the
-// bearer token and the X-Act-As-Admin header), pointed at /api/sync.
+// The SyncTransport port over the web app's HTTP client (which already carries
+// the bearer token set at login and the same-origin /api base), pointed at the
+// Spring /api/sync endpoints. Mirror of the mobile transport.
 import type { PullResponse, PushRequest, PushResponse, SyncTransport } from "@center/core";
 import { api } from "@/lib/api";
 

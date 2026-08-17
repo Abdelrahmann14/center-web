@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useMemo, useState } from "react";
-import { Plus, Loader2, Pencil, Power, Trash2, Users } from "lucide-react";
+import { AlertCircle, Plus, Loader2, Pencil, Power, Trash2, Users, Coins } from "@/components/icons";
 import { DeleteButton } from "@/components/DeleteButton";
 import { api, ApiError } from "@/lib/api";
 import { cachedGet, invalidate } from "@/lib/dataCache";
@@ -16,10 +16,23 @@ interface Group {
   center_name: string;
   grade: string;
   is_active: boolean;
+  deleted?: boolean;
   student_count: number;
   last_attendance: string | null;
   lesson_price: number | null;
+  version?: number;
 }
+
+/** The wire shape a group create/edit carries (matches GroupRequest). */
+const groupPayload = (
+  g: Pick<Group, "day_of_week" | "start_time" | "center_name" | "grade" | "is_active">
+) => ({
+  day_of_week: g.day_of_week,
+  start_time: g.start_time,
+  center_name: g.center_name,
+  grade: g.grade,
+  is_active: g.is_active,
+});
 interface Grade {
   id: string;
   name: string;
@@ -29,12 +42,34 @@ interface Center {
   id: string;
   name: string;
   is_active: boolean;
+  /** Price list, carried on the center itself (that is how it is saved). */
+  grades?: { grade: string; price: number }[];
 }
 
 const ar = (n: number) => n.toLocaleString("ar-EG");
 
 /** JS weeks start on Sunday; this app's start on Saturday. */
 const todayDow = (new Date().getDay() + 1) % 7;
+
+/**
+ * One slot is one (day, minute). The server stores a LocalTime, so the wire
+ * value can carry seconds - key on HH:mm alone or "16:00" and "16:00:00" would
+ * read as two different slots.
+ */
+const slotKey = (day: number | string, time: string) => `${day}-${time.slice(0, 5)}`;
+
+/**
+ * The first quarter-hour inside `hour` that no group holds yet. Two groups can
+ * share a day but not a minute, so offering a taken time from the calendar's +
+ * button only earns a rejection - offer the next free one instead.
+ */
+function freeTimeIn(hour: number, day: number, groups: Group[]): string {
+  const hh = String(hour).padStart(2, "0");
+  const taken = new Set(
+    groups.filter((g) => g.day_of_week === day).map((g) => g.start_time.slice(0, 5))
+  );
+  return ["00", "30", "15", "45"].map((mm) => `${hh}:${mm}`).find((t) => !taken.has(t)) ?? `${hh}:00`;
+}
 
 /**
  * The week is the real shape of this data, so the page is a timetable rather
@@ -51,10 +86,11 @@ export default function GroupsPage() {
   const [showForm, setShowForm] = useState(false);
   const [editGroup, setEditGroup] = useState<Group | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<Group | null>(null);
+  // The group students are transferred to when their group is deleted.
+  const [transferTo, setTransferTo] = useState("");
   const [centerFilter, setCenterFilter] = useState("");
   // Set when a new group is started from an empty calendar cell.
   const [preset, setPreset] = useState<{ day: number; time: string } | null>(null);
-
   async function load() {
     setLoading(true);
     try {
@@ -63,7 +99,9 @@ export default function GroupsPage() {
         cachedGet<Grade[]>("/grades"),
         cachedGet<Center[]>("/centers"),
       ]);
-      setGroups(g);
+      // Deleted groups stay in the API (so history labels resolve) but never show
+      // on the management page.
+      setGroups(g.filter((x) => !x.deleted));
       setGrades(gr);
       setCenters(c);
     } finally {
@@ -73,6 +111,7 @@ export default function GroupsPage() {
 
   useEffect(() => {
     load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   function upsert(g: Group, isEdit: boolean) {
@@ -80,30 +119,38 @@ export default function GroupsPage() {
     invalidate("/groups");
   }
 
-  // Optimistic: flip instantly, call API in background, revert on failure.
-  async function toggleActive(g: Group) {
+  /**
+   * Flip the active flag through the dedicated PATCH.
+   *
+   * Returns the state that stuck, so a caller holding its own copy of the flag
+   * (the form) follows rather than drifting.
+   */
+  async function toggleActive(g: Group): Promise<boolean> {
     const next = !g.is_active;
     setGroups((prev) => prev.map((x) => (x.id === g.id ? { ...x, is_active: next } : x)));
     try {
-      const updated = await api.patch<Group>(`/groups/${g.id}/active`, { is_active: next });
-      setGroups((prev) => prev.map((x) => (x.id === g.id ? updated : x)));
-      invalidate("/groups");
+      await api.patch<Group>(`/groups/${g.id}/active`, { is_active: next });
+      return next;
     } catch {
       setGroups((prev) => prev.map((x) => (x.id === g.id ? { ...x, is_active: g.is_active } : x)));
       toast("تعذّر تغيير الحالة", "error");
+      return g.is_active;
     }
   }
 
-  async function handleDelete(g: Group) {
+  async function handleDelete(g: Group, target?: string) {
     try {
-      await api.del(`/groups/${g.id}`);
+      const q = target ? `?transfer_to_group_id=${target}` : "";
+      await api.del(`/groups/${g.id}${q}`);
       setGroups((prev) => prev.filter((x) => x.id !== g.id));
       invalidate("/groups");
+      invalidate("/students");
       toast("تم حذف المجموعة");
-    } catch {
-      toast("تعذّر حذف المجموعة", "error");
+    } catch (err) {
+      toast(err instanceof ApiError ? err.message : "تعذّر حذف المجموعة", "error");
     } finally {
       setConfirmDelete(null);
+      setTransferTo("");
     }
   }
 
@@ -124,6 +171,14 @@ export default function GroupsPage() {
       })).filter((d) => d.slots.length > 0),
     [shown]
   );
+
+  // Every occupied (day, time). Built from all groups, never the filtered view -
+  // a center filter must not hide a clash the server would reject anyway.
+  const takenSlots = useMemo(() => {
+    const m = new Map<string, Group>();
+    for (const g of groups) m.set(slotKey(g.day_of_week, g.start_time), g);
+    return m;
+  }, [groups]);
 
   const totalStudents = shown.reduce((sum, g) => sum + g.student_count, 0);
   // Only the centers that actually hold a group are worth offering as filters.
@@ -172,11 +227,9 @@ export default function GroupsPage() {
       {week.length === 0 ? null : (
         <WeekCalendar
           groups={shown}
-          onToggle={toggleActive}
           onEdit={setEditGroup}
-          onDelete={setConfirmDelete}
           onCreate={(day, hour) => {
-            setPreset({ day, time: `${String(hour).padStart(2, "0")}:00` });
+            setPreset({ day, time: freeTimeIn(hour, day, groups) });
             setShowForm(true);
           }}
         />
@@ -245,6 +298,7 @@ export default function GroupsPage() {
         <GroupForm
           grades={grades}
           centers={centers}
+          taken={takenSlots}
           preset={preset ?? undefined}
           onClose={() => {
             setShowForm(false);
@@ -263,6 +317,21 @@ export default function GroupsPage() {
           initial={editGroup}
           grades={grades}
           centers={centers}
+          taken={takenSlots}
+          // The open form is the source of truth for the flag while it is open,
+          // so the toggled state has to land back on it - otherwise a second
+          // press would compute its flip from the state before the first.
+          onToggle={async () => {
+            const next = await toggleActive(editGroup);
+            setEditGroup((prev) => (prev ? { ...prev, is_active: next } : prev));
+            return next;
+          }}
+          // Deleting is a decision of its own, so the form steps aside and the
+          // confirmation takes the screen instead of stacking on top of it.
+          onDelete={() => {
+            setConfirmDelete(editGroup);
+            setEditGroup(null);
+          }}
           onClose={() => setEditGroup(null)}
           onSaved={(g) => {
             upsert(g, true);
@@ -274,18 +343,25 @@ export default function GroupsPage() {
       {confirmDelete && (
         <Modal
           title="حذف المجموعة"
-          onClose={() => setConfirmDelete(null)}
+          onClose={() => {
+            setConfirmDelete(null);
+            setTransferTo("");
+          }}
           footer={
             <>
               <button
-                onClick={() => setConfirmDelete(null)}
+                onClick={() => {
+                  setConfirmDelete(null);
+                  setTransferTo("");
+                }}
                 className="rounded-xl border border-slate-300 px-4 py-2.5 font-medium text-slate-600 transition hover:bg-slate-50"
               >
                 إلغاء
               </button>
               <button
-                onClick={() => handleDelete(confirmDelete)}
-                className="rounded-xl bg-rose-600 px-5 py-2.5 font-medium text-white transition hover:bg-rose-700"
+                onClick={() => handleDelete(confirmDelete, transferTo || undefined)}
+                disabled={confirmDelete.student_count > 0 && !transferTo}
+                className="rounded-xl bg-rose-600 px-5 py-2.5 font-medium text-white transition hover:bg-rose-700 disabled:opacity-50"
               >
                 حذف
               </button>
@@ -294,8 +370,38 @@ export default function GroupsPage() {
         >
           <p className="text-sm text-slate-600">
             سيتم حذف مجموعة {dayLabel(confirmDelete.day_of_week)} {fmtTime(confirmDelete.start_time)} في{" "}
-            {confirmDelete.center_name}.
+            {confirmDelete.center_name}. تبقى بيانات الحصص السابقة كما هي في سجلّات الطلاب.
           </p>
+          {confirmDelete.student_count > 0 &&
+            (() => {
+              const targets = groups.filter(
+                (g) =>
+                  g.id !== confirmDelete.id &&
+                  g.grade === confirmDelete.grade &&
+                  g.is_active &&
+                  !g.deleted
+              );
+              return (
+                <div className="mt-4">
+                  <Field label={`نقل ${confirmDelete.student_count.toLocaleString("ar-EG")} طالب إلى مجموعة`}>
+                    <Select
+                      value={transferTo}
+                      onChange={setTransferTo}
+                      placeholder="اختر المجموعة"
+                      options={targets.map((g) => ({
+                        value: g.id,
+                        label: `${dayLabel(g.day_of_week)} ${fmtTime(g.start_time)} - ${g.center_name}`,
+                      }))}
+                    />
+                  </Field>
+                  <p className="mt-1 text-xs text-slate-400">
+                    {targets.length === 0
+                      ? "لا توجد مجموعة أخرى في نفس الصف - أنشئ واحدة أولاً لنقل الطلاب إليها."
+                      : "لا يمكن ترك الطلاب بدون مجموعة، فاختر مجموعة لنقلهم إليها."}
+                  </p>
+                </div>
+              );
+            })()}
         </Modal>
       )}
     </div>
@@ -313,15 +419,11 @@ const hourOf = (time: string) => Number(time.slice(0, 2));
  */
 function WeekCalendar({
   groups,
-  onToggle,
   onEdit,
-  onDelete,
   onCreate,
 }: {
   groups: Group[];
-  onToggle: (g: Group) => void;
   onEdit: (g: Group) => void;
-  onDelete: (g: Group) => void;
   onCreate: (day: number, hour: number) => void;
 }) {
   const today = todayDow;
@@ -389,8 +491,10 @@ function WeekCalendar({
 
         {hours.map((h) => (
           <Fragment key={h}>
-            {/* The hour, read as the system reads every other clock. */}
-            <div className="border-b border-slate-100 bg-slate-50/40 px-3 pt-2.5 text-end text-xs font-medium text-slate-400">
+            {/* The hour, read as the system reads every other clock. The rule
+                under it runs unbroken across all seven days, so one hour never
+                bleeds into the next. */}
+            <div className="border-b border-slate-200 bg-slate-50/40 px-3 pt-2.5 text-end text-xs font-medium text-slate-500">
               {fmtTime(`${String(h).padStart(2, "0")}:00`)}
             </div>
             {DAYS.map((d) => {
@@ -398,30 +502,26 @@ function WeekCalendar({
               return (
                 <div
                   key={d.value}
-                  className={`group/cell flex min-h-[5.5rem] flex-col gap-2 border-b border-s border-slate-100 p-2 transition ${
+                  className={`group/cell flex min-h-[6.25rem] flex-col gap-4 border-b border-s border-slate-200 p-2 pb-3 transition ${
                     d.value === today ? "bg-accent/[0.04]" : ""
                   }`}
                 >
                   {slots.map((g) => (
-                    <SlotBlock
-                      key={g.id}
-                      group={g}
-                      onToggle={() => onToggle(g)}
-                      onEdit={() => onEdit(g)}
-                      onDelete={() => onDelete(g)}
-                    />
+                    <SlotBlock key={g.id} group={g} onEdit={() => onEdit(g)} />
                   ))}
-                  {/* An empty hour is an offer: click it to schedule there. */}
-                  <button
-                    type="button"
-                    onClick={() => onCreate(d.value, h)}
-                    title={`مجموعة جديدة ${d.label} ${fmtTime(`${String(h).padStart(2, "0")}:00`)}`}
-                    className={`flex items-center justify-center rounded-lg text-slate-300 opacity-0 transition hover:bg-accent/10 hover:text-accent focus:outline-none focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-accent/45 group-hover/cell:opacity-100 ${
-                      slots.length === 0 ? "flex-1" : "py-1"
-                    }`}
-                  >
-                    <Plus className="h-4 w-4" />
-                  </button>
+                  {/* An empty hour is an offer: click it to schedule there. An
+                      hour that already holds a group is not - it keeps its slot
+                      and nothing invites a second one on top of it. */}
+                  {slots.length === 0 && (
+                    <button
+                      type="button"
+                      onClick={() => onCreate(d.value, h)}
+                      title={`مجموعة جديدة ${d.label} ${fmtTime(`${String(h).padStart(2, "0")}:00`)}`}
+                      className="flex flex-1 items-center justify-center rounded-lg text-slate-300 opacity-0 transition hover:bg-accent/10 hover:text-accent focus:outline-none focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-accent/45 group-hover/cell:opacity-100"
+                    >
+                      <Plus className="h-4 w-4" />
+                    </button>
+                  )}
                 </div>
               );
             })}
@@ -432,76 +532,91 @@ function WeekCalendar({
   );
 }
 
-/** One group inside a calendar cell. Click opens it; the corner acts on it. */
-function SlotBlock({
-  group: g,
-  onToggle,
-  onEdit,
-  onDelete,
-}: {
-  group: Group;
-  onToggle: () => void;
-  onEdit: () => void;
-  onDelete: () => void;
-}) {
+/**
+ * One group inside a calendar cell, read top to bottom as a teacher reads a
+ * timetable: when, how many, where, which grade.
+ *
+ * A light card, not a solid dark block: a white surface with an accent edge and
+ * a dark, high-contrast time so it reads at a glance without weighing the whole
+ * grid down. The head count and grade each ride in their own tint chip, so the
+ * three facts separate by shape, not just by position. A stopped group is the
+ * same card drawn hollow and dimmed. The card carries no controls of its own -
+ * every action lives in the form it opens.
+ */
+function SlotBlock({ group: g, onEdit }: { group: Group; onEdit: () => void }) {
+  const on = g.is_active;
   return (
-    // A running group carries the sidebar's ink, so a taught hour reads as a
-    // solid mark on the week. A stopped one is the same shape drawn hollow.
-    <div
-      className={`group/slot relative rounded-lg border-s-[3px] shadow-sm transition ${
-        g.is_active
-          ? "border-s-accent bg-dark hover:shadow-md"
-          : "border border-dashed border-slate-200 border-s-slate-300 bg-white shadow-none"
+    <button
+      type="button"
+      onClick={onEdit}
+      title={`${fmtTime(g.start_time)} · ${g.center_name} · ${g.grade} · ${ar(
+        g.student_count
+      )} طالب${g.lesson_price != null ? ` · ${ar(g.lesson_price)} جنيه للحصة` : ""}${
+        on ? "" : " · معطّلة"
+      }`}
+      className={`group/slot block w-full rounded-xl border p-3 text-right transition-all duration-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/45 ${
+        on
+          ? // Real depth, three layers: an inset highlight lights the top face,
+            // a solid darker-teal lip under the card is its physical thickness,
+            // and a soft ambient shadow floats it above the grid. The bright
+            // accent edge on the start side is the lit corner. Hover lifts the
+            // card and grows the lip - the illusion of picking it up.
+            "border-slate-300 bg-slate-100 shadow-[inset_0_1px_0_0_rgb(255_255_255_/_0.9),0_5px_0_0_var(--color-accent-hover),0_12px_20px_-5px_rgb(15_23_42_/_0.28)] motion-safe:hover:-translate-y-1 hover:shadow-[inset_0_1px_0_0_rgb(255_255_255_/_0.9),0_8px_0_0_var(--color-accent-hover),0_22px_30px_-6px_rgb(15_23_42_/_0.34)]"
+          : "border-dashed border-slate-300 bg-slate-50/60 opacity-70 hover:opacity-100"
       }`}
     >
-      <button
-        type="button"
-        onClick={onEdit}
-        title={`${g.center_name} · ${g.grade} · ${ar(g.student_count)} طالب`}
-        className="block w-full rounded-lg p-2 text-right focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/45"
-      >
-        <span className="flex items-baseline justify-between gap-1">
-          <span className={`text-sm font-bold ${g.is_active ? "text-white" : "text-slate-400"}`}>
-            {fmtTime(g.start_time)}
-          </span>
-          <span className={`text-[11px] ${g.is_active ? "text-white/50" : "text-slate-300"}`}>
-            {ar(g.student_count)}
-          </span>
-        </span>
+      {/* Row 1 - the start time leads (it is what tells two slots apart), the
+          head count rides in an accent chip on the other end. */}
+      <span className="flex items-center justify-between gap-1.5">
         <span
-          className={`mt-1 block truncate text-[11px] ${g.is_active ? "text-white/70" : "text-slate-400"}`}
+          className={`truncate text-base font-extrabold leading-5 tracking-tight ${
+            on ? "text-dark" : "text-slate-400"
+          }`}
         >
-          {g.center_name}
+          {fmtTime(g.start_time)}
         </span>
         <span
-          className={`mt-1.5 inline-block max-w-full truncate rounded px-1.5 py-0.5 text-[11px] font-medium ${
-            g.is_active ? "bg-white/10 text-white/90" : "bg-slate-100 text-slate-400"
+          className={`flex shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-bold leading-4 tabular-nums ${
+            on ? "bg-accent/10 text-accent" : "bg-slate-100 text-slate-400"
+          }`}
+        >
+          <Users className="h-3 w-3 shrink-0" />
+          {ar(g.student_count)}
+        </span>
+      </span>
+
+      {/* Row 2 - the centre, quietly. */}
+      <span
+        className={`mt-1.5 block truncate text-xs leading-4 ${on ? "text-slate-500" : "text-slate-400"}`}
+      >
+        {g.center_name}
+      </span>
+
+      {/* Row 3 - the grade in its own chip, the price trailing it. */}
+      <span className="mt-2 flex items-center justify-between gap-1.5">
+        <span
+          className={`truncate rounded-md px-1.5 py-0.5 text-[11px] font-bold leading-4 ${
+            on ? "bg-slate-100 text-slate-600" : "text-slate-400"
           }`}
         >
           {g.grade}
         </span>
-      </button>
+        {g.lesson_price != null && (
+          <span
+            className={`flex shrink-0 items-center gap-1 text-[11px] font-semibold leading-4 tabular-nums ${
+              on ? "text-slate-600" : "text-slate-400"
+            }`}
+          >
+            <Coins className={`h-3 w-3 shrink-0 ${on ? "text-amber-500" : "text-slate-300"}`} />
+            {ar(g.lesson_price)} ج
+          </span>
+        )}
+      </span>
 
-      {/* Quiet until the slot is hovered or focused, so the grid stays readable. */}
-      <div className="absolute left-1.5 top-1.5 flex gap-1 opacity-0 transition group-hover/slot:opacity-100 group-focus-within/slot:opacity-100">
-        <button
-          type="button"
-          onClick={onToggle}
-          title={g.is_active ? "تعطيل" : "تفعيل"}
-          className="rounded-md bg-white p-1 text-slate-500 shadow-sm ring-1 ring-slate-200 transition hover:text-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/45"
-        >
-          <Power className="h-3.5 w-3.5" />
-        </button>
-        <button
-          type="button"
-          onClick={onDelete}
-          title="حذف"
-          className="rounded-md bg-white p-1 text-slate-500 shadow-sm ring-1 ring-slate-200 transition hover:text-rose-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-rose-300"
-        >
-          <Trash2 className="h-3.5 w-3.5" />
-        </button>
-      </div>
-    </div>
+      {!on && (
+        <span className="mt-1.5 block text-[10px] font-bold leading-4 text-slate-400">معطّلة</span>
+      )}
+    </button>
   );
 }
 
@@ -543,7 +658,9 @@ function SlotCard({
 
       <div className="mt-3 flex flex-wrap items-center gap-2">
         <span className="rounded-lg bg-accent/10 px-2 py-0.5 text-xs font-medium text-accent">{g.grade}</span>
-        {g.lesson_price != null && <Money value={g.lesson_price} className="text-xs text-slate-500" />}
+        {g.lesson_price != null && (
+          <Money value={ar(g.lesson_price)} className="text-xs text-slate-500" />
+        )}
         {!g.is_active && (
           <span className="rounded-lg bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-500">معطّلة</span>
         )}
@@ -598,15 +715,23 @@ function GroupForm({
   initial,
   grades,
   centers,
+  taken,
   preset,
+  onToggle,
+  onDelete,
   onClose,
   onSaved,
 }: {
   initial?: Group;
   grades: Grade[];
   centers: Center[];
+  /** Every (day, time) already holding a group, keyed by slotKey. */
+  taken: Map<string, Group>;
   /** Day and hour the form opened on, when it came from an empty calendar cell. */
   preset?: { day: number; time: string };
+  /** Flips the group's active flag; resolves to the state that stuck. */
+  onToggle?: () => Promise<boolean>;
+  onDelete?: () => void;
   onClose: () => void;
   onSaved: (g: Group) => void;
 }) {
@@ -622,20 +747,30 @@ function GroupForm({
   const activeCenters = centers.filter((c) => c.is_active || c.name === initial?.center_name);
   const activeGrades = grades.filter((g) => g.is_active || g.name === initial?.grade);
 
+  // The server rejects a second group on the same minute. Say so while the time
+  // is being picked, rather than letting the save fail.
+  const holder = taken.get(slotKey(day, time));
+  const clash = holder && holder.id !== initial?.id ? holder : null;
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError("");
+    if (clash) {
+      setError("اختر وقتاً آخر - هذا الموعد محجوز");
+      return;
+    }
     if (!center || !grade) {
       setError("اختر السنتر والصف");
       return;
     }
     setSaving(true);
-    const payload = {
+    const payload = groupPayload({
       day_of_week: Number(day),
       start_time: time,
       center_name: center,
       grade,
-    };
+      is_active: initial?.is_active ?? true,
+    });
     try {
       const saved = isEdit
         ? await api.put<Group>(`/groups/${initial.id}`, payload)
@@ -658,6 +793,32 @@ function GroupForm({
       onClose={onClose}
       footer={
         <>
+          {/* Acting on the group lives with the group, not on the calendar block
+              - the week stays a week, and nothing hides behind a hover. */}
+          {isEdit && (
+            <div className="me-auto flex items-center gap-2">
+              <button
+                type="button"
+                onClick={onToggle}
+                className={`flex items-center gap-2 rounded-xl border px-4 py-2.5 font-medium transition ${
+                  initial.is_active
+                    ? "border-slate-300 text-slate-600 hover:bg-slate-50"
+                    : "border-accent bg-accent/10 text-accent hover:bg-accent/15"
+                }`}
+              >
+                <Power className="h-4 w-4" />
+                {initial.is_active ? "تعطيل" : "تفعيل"}
+              </button>
+              <button
+                type="button"
+                onClick={onDelete}
+                className="flex items-center gap-2 rounded-xl border border-rose-200 px-4 py-2.5 font-medium text-rose-600 transition hover:bg-rose-50"
+              >
+                <Trash2 className="h-4 w-4" />
+                حذف
+              </button>
+            </div>
+          )}
           <button
             type="button"
             onClick={onClose}
@@ -668,7 +829,7 @@ function GroupForm({
           <button
             type="submit"
             form="group-form"
-            disabled={saving}
+            disabled={saving || clash !== null}
             className="flex items-center justify-center gap-2 rounded-xl bg-accent px-5 py-2.5 font-medium text-white transition hover:bg-accent-hover disabled:opacity-60"
           >
             {saving ? <Loader2 className="h-5 w-5 animate-spin" /> : <Plus className="h-5 w-5" />}
@@ -681,9 +842,25 @@ function GroupForm({
         <Field label="اليوم">
           <Select value={day} onChange={setDay} options={DAYS.map((d) => ({ value: String(d.value), label: d.label }))} />
         </Field>
-        <Field label="الوقت">
-          <input type="time" value={time} onChange={(e) => setTime(e.target.value)} className={inputClass} dir="ltr" />
-        </Field>
+        <div>
+          <Field label="الوقت">
+            <input
+              type="time"
+              value={time}
+              onChange={(e) => setTime(e.target.value)}
+              className={inputClass}
+              dir="ltr"
+            />
+          </Field>
+          {clash && (
+            <p className="mt-1 flex items-start gap-1 px-1 text-xs font-medium text-rose-600">
+              <AlertCircle className="mt-px h-3.5 w-3.5 shrink-0" />
+              <span>
+                محجوز لمجموعة {clash.center_name} · {clash.grade}
+              </span>
+            </p>
+          )}
+        </div>
         <Field label="السنتر">
           <Select
             value={center}

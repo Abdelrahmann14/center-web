@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { BellRing } from "lucide-react";
+import { BellRing } from "@/components/icons";
 import { api } from "@/lib/api";
 import { Modal } from "@/components/ui";
 

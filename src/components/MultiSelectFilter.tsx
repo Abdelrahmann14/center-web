@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Check, ChevronDown, Search } from "lucide-react";
+import { Check, ChevronDown, Search } from "@/components/icons";
 
 /** At/above this many options the dropdown gains a search box + select-all. */
 const SEARCH_THRESHOLD = 8;

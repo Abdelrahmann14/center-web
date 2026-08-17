@@ -9,16 +9,14 @@ import {
   MessageCircle,
   QrCode,
   Trash2,
-  Search,
-  X,
-  Wifi,
-  WifiOff,
   Link2,
-} from "lucide-react";
+  Clock,
+} from "@/components/icons";
 import { api, ApiError } from "@/lib/api";
 import { toast } from "@/components/ui/toast";
 import { LoaderBlock } from "@/components/PencilLoader";
-import { Modal, Field, FormNotice, inputClass, requiredArabic } from "@/components/ui";
+import { Modal, Field, FieldError, FormNotice, inputClass } from "@/components/ui";
+import { WhatsappLogo } from "@/components/WhatsappLogo";
 
 interface WaNumber {
   id: string;
@@ -89,7 +87,10 @@ export function WhatsappService({ apiBase }: { apiBase: string }) {
   return (
     <div>
       <div className="flex items-center justify-between gap-4">
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-3">
+          <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-white shadow-sm ring-1 ring-slate-200">
+            <WhatsappLogo className="h-6 w-6" />
+          </span>
           <h2 className="text-lg font-bold text-slate-800">أرقام واتساب</h2>
         </div>
         <button
@@ -168,11 +169,64 @@ function NumberCard({
 }) {
   const [busy, setBusy] = useState(false);
   const [confirmRemove, setConfirmRemove] = useState(false);
-  const [picking, setPicking] = useState(false);
+
+  // Send delay (Green API account setting, per number). Loaded lazily from the
+  // instance so it reflects whatever is actually in force.
+  const [delay, setDelay] = useState<number | null>(null);
+  const [delayInput, setDelayInput] = useState("");
+  const [savingDelay, setSavingDelay] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    api
+      .get<{ delay_seconds: number }>(`${apiBase}/${number.id}/delay`)
+      .then((r) => {
+        if (!alive) return;
+        setDelay(r.delay_seconds);
+        setDelayInput(String(r.delay_seconds));
+      })
+      .catch(() => alive && setDelay(0));
+    return () => {
+      alive = false;
+    };
+  }, [apiBase, number.id]);
+
+  async function saveDelay() {
+    const seconds = Number(delayInput);
+    if (!Number.isInteger(seconds) || seconds < 1 || seconds > 600) {
+      toast.error("أدخل مدة بين ثانية واحدة و600 ثانية");
+      return;
+    }
+    setSavingDelay(true);
+    try {
+      const r = await api.put<{ delay_seconds: number }>(`${apiBase}/${number.id}/delay`, {
+        delay_seconds: seconds,
+      });
+      setDelay(r.delay_seconds);
+      setDelayInput(String(r.delay_seconds));
+      toast.success("تم حفظ مدة التأخير");
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "تعذّر حفظ التأخير");
+    } finally {
+      setSavingDelay(false);
+    }
+  }
+
+  // Autosave the delay a beat after the last edit, once it is a valid, changed
+  // value - no Save button; the toast is the confirmation.
+  useEffect(() => {
+    if (delay === null) return;
+    const seconds = Number(delayInput);
+    if (!Number.isInteger(seconds) || seconds < 1 || seconds > 600 || seconds === delay) return;
+    const t = setTimeout(() => {
+      void saveDelay();
+    }, 900);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [delayInput, delay]);
 
   const title = number.label || (number.phone ? `+${number.phone}` : number.instance_id);
   const mine = resps.filter((r) => r.instance_id === number.id);
-  const available = resps.filter((r) => r.instance_id === null);
   const otherConnected = numbers.filter((n) => n.id !== number.id && n.connected).length;
 
   async function logout() {
@@ -202,38 +256,30 @@ function NumberCard({
     }
   }
 
-  async function assign(code: string, instanceId: string | null) {
-    try {
-      await api.put(`${apiBase}/responsibilities/${code}`, { instance_id: instanceId });
-      await onChanged();
-    } catch (err) {
-      toast.error(err instanceof ApiError ? err.message : "تعذّر تحديث المسؤولية");
-    }
-  }
-
   return (
     <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
       <div className="flex items-start justify-between gap-3">
         <div className="flex items-center gap-3">
           <div className={`flex h-11 w-11 items-center justify-center rounded-xl ${number.connected ? "bg-green-50" : "bg-slate-100"}`}>
-            {number.connected ? <Wifi className="h-5 w-5 text-green-600" /> : <WifiOff className="h-5 w-5 text-slate-400" />}
+            <WhatsappLogo className="h-6 w-6" />
           </div>
           <div>
             <p className="font-bold text-slate-800" dir="auto">{title}</p>
             <p className="text-xs text-slate-400" dir="ltr">Instance {number.instance_id}</p>
           </div>
         </div>
-        <span
-          className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-semibold ${
-            number.connected ? "bg-green-50 text-green-700" : "bg-rose-50 text-rose-600"
-          }`}
+        <button
+          onClick={() => setConfirmRemove(true)}
+          disabled={busy}
+          className="flex shrink-0 items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium text-rose-600 transition hover:bg-rose-50 disabled:opacity-60"
         >
-          {number.connected ? "متصل" : "غير متصل"}
-        </span>
+          <Trash2 className="h-4 w-4" />
+          إزالة
+        </button>
       </div>
 
-      {/* Connection actions */}
-      <div className="mt-4 flex flex-wrap items-center gap-2">
+      {/* Connection actions - separated from the header by a light divider. */}
+      <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-slate-100 pt-4">
         {number.connected ? (
           <>
             {number.phone && (
@@ -260,54 +306,37 @@ function NumberCard({
             ربط الرقم (مسح QR)
           </button>
         )}
-        <button
-          onClick={() => setConfirmRemove(true)}
-          disabled={busy}
-          className="mr-auto flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium text-rose-600 transition hover:bg-rose-50 disabled:opacity-60"
-        >
-          <Trash2 className="h-4 w-4" />
-          إزالة
-        </button>
       </div>
 
-      {/* Responsibilities */}
+      {/* Send delay - the pause Green API leaves between outgoing messages,
+          configured here instead of from the Green API dashboard. */}
       <div className="mt-4 border-t border-slate-100 pt-4">
-        <div className="flex items-center justify-between">
-          <p className="text-sm font-semibold text-slate-700">المسؤوليات</p>
-          <button
-            onClick={() => setPicking((p) => !p)}
-            className="flex items-center gap-1 text-xs font-medium text-accent transition hover:text-accent-hover"
-          >
-            <Plus className="h-3.5 w-3.5" />
-            إضافة مسؤولية
-          </button>
+        <div className="flex items-center gap-1.5 text-sm font-semibold text-slate-700">
+          <Clock className="h-4 w-4 text-slate-400" />
+          التأخير بين الرسائل
         </div>
-
-        {mine.length === 0 ? (
-          <p className="mt-2 text-xs text-slate-400">لا مسؤوليات مُسندة لهذا الرقم.</p>
-        ) : (
-          <div className="mt-2 flex flex-wrap gap-1.5">
-            {mine.map((r) => (
-              <span key={r.code} className="flex items-center gap-1 rounded-lg bg-accent/10 px-2 py-1 text-xs text-accent" title={r.description}>
-                {r.label}
-                <button onClick={() => assign(r.code, null)} className="rounded-full p-0.5 transition hover:bg-accent/20" aria-label="إزالة">
-                  <X className="h-3 w-3" />
-                </button>
-              </span>
-            ))}
-          </div>
-        )}
-
-        {picking && (
-          <ResponsibilityPicker
-            available={available}
-            onPick={(code) => {
-              assign(code, number.id);
-              setPicking(false);
-            }}
-            onClose={() => setPicking(false)}
+        <p className="mt-0.5 text-xs text-slate-400">
+          المدة التي ينتظرها Green API بين كل رسالة والتالية. يعيد تشغيل الرقم عند الحفظ وتسري خلال دقائق.
+        </p>
+        <div className="mt-2 flex items-center gap-2">
+          <input
+            type="number"
+            min={1}
+            max={600}
+            inputMode="numeric"
+            value={delayInput}
+            onChange={(e) => setDelayInput(e.target.value)}
+            disabled={delay === null}
+            className="w-24 rounded-lg border border-slate-300 px-3 py-1.5 text-sm outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20 disabled:opacity-60"
           />
-        )}
+          <span className="text-sm text-slate-500">ثانية</span>
+          {savingDelay && (
+            <span className="flex items-center gap-1.5 text-xs font-medium text-slate-400">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              جارٍ الحفظ…
+            </span>
+          )}
+        </div>
       </div>
 
       {confirmRemove && (
@@ -356,57 +385,6 @@ function NumberCard({
   );
 }
 
-function ResponsibilityPicker({
-  available,
-  onPick,
-  onClose,
-}: {
-  available: Responsibility[];
-  onPick: (code: string) => void;
-  onClose: () => void;
-}) {
-  const [q, setQ] = useState("");
-  const filtered = available.filter(
-    (r) => r.label.includes(q) || r.description.includes(q) || r.code.includes(q.toLowerCase()),
-  );
-
-  return (
-    <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50/60 p-2">
-      <div className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5">
-        <Search className="h-4 w-4 text-slate-400" />
-        <input
-          autoFocus
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-          placeholder="ابحث عن مسؤولية…"
-          className="w-full bg-transparent text-sm outline-none"
-        />
-        <button onClick={onClose} className="rounded p-0.5 text-slate-400 hover:text-slate-600" aria-label="إغلاق">
-          <X className="h-4 w-4" />
-        </button>
-      </div>
-      <div className="mt-2 max-h-52 overflow-auto">
-        {filtered.length === 0 ? (
-          <p className="px-2 py-6 text-center text-xs text-slate-400">
-            لا توجد مسؤوليات متاحة. كل المسؤوليات إمّا مُسندة لأرقام أخرى أو لا تطابق البحث.
-          </p>
-        ) : (
-          filtered.map((r) => (
-            <button
-              key={r.code}
-              onClick={() => onPick(r.code)}
-              className="flex w-full flex-col items-start gap-0.5 rounded-lg px-2.5 py-2 text-right transition hover:bg-white"
-            >
-              <span className="text-sm font-medium text-slate-700">{r.label}</span>
-              <span className="text-xs text-slate-400">{r.description}</span>
-            </button>
-          ))
-        )}
-      </div>
-    </div>
-  );
-}
-
 function AddNumberModal({
   apiBase,
   onClose,
@@ -419,13 +397,18 @@ function AddNumberModal({
   const [instanceId, setInstanceId] = useState("");
   const [apiToken, setApiToken] = useState("");
   const [label, setLabel] = useState("");
+  const [attempted, setAttempted] = useState(false);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
+
+  const instanceErr = attempted && !instanceId.trim() ? "مطلوب" : null;
+  const tokenErr = attempted && !apiToken.trim() ? "مطلوب" : null;
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     setError("");
-    if (!instanceId.trim() || !apiToken.trim()) return setError("أدخل الـ Instance ID والـ API Token");
+    setAttempted(true);
+    if (!instanceId.trim() || !apiToken.trim()) return;
     setSaving(true);
     try {
       const created = await api.post<WaNumber>(apiBase, {
@@ -460,7 +443,7 @@ function AddNumberModal({
         </>
       }
     >
-      <form id="add-wa-form" onSubmit={submit} className="space-y-4">
+      <form id="add-wa-form" onSubmit={submit} noValidate className="space-y-4">
         <p className="text-sm leading-6 text-slate-500">
           أدخل بيانات الـ Instance من Green API. بعد الإضافة ستظهر شاشة رمز QR لمسحه وربط الرقم مباشرةً.
         </p>
@@ -468,10 +451,16 @@ function AddNumberModal({
           <input value={label} onChange={(e) => setLabel(e.target.value)} className={inputClass} />
         </Field>
         <Field label="Instance ID" hint="مثال: 1101xxxxxx">
-          <input value={instanceId} onChange={(e) => setInstanceId(e.target.value)} required {...requiredArabic} dir="ltr" className={inputClass} />
+          <div className="relative">
+            <FieldError message={instanceErr} />
+            <input value={instanceId} onChange={(e) => setInstanceId(e.target.value)} dir="ltr" className={inputClass} />
+          </div>
         </Field>
         <Field label="API Token" hint="عشرون حرفًا كما يظهر في لوحة Green API">
-          <input value={apiToken} onChange={(e) => setApiToken(e.target.value)} required {...requiredArabic} dir="ltr" className={inputClass} />
+          <div className="relative">
+            <FieldError message={tokenErr} />
+            <input value={apiToken} onChange={(e) => setApiToken(e.target.value)} dir="ltr" className={inputClass} />
+          </div>
         </Field>
         <FormNotice message={error} />
       </form>
@@ -492,12 +481,32 @@ function QrModal({
 }) {
   const [qr, setQr] = useState<string | null>(null);
   const [note, setNote] = useState("جارٍ تجهيز رمز QR…");
+  const [expired, setExpired] = useState(false);
+  // Bumping this restarts the effect below, which is how "حاول مرة أخرى" works.
+  const [attempt, setAttempt] = useState(0);
   const stop = useRef(false);
 
   useEffect(() => {
     stop.current = false;
+    setExpired(false);
     let qrTimer: ReturnType<typeof setTimeout>;
     let stateTimer: ReturnType<typeof setInterval>;
+    // Both loops below poll indefinitely, and BOTH reach Green API through the
+    // server: one QR fetch a second plus a number-state read every three
+    // seconds. A modal left open on a forgotten tab was therefore an
+    // open-ended request generator - thousands of third-party calls an hour for
+    // a scan that either happens in the first minute or does not happen. Linking
+    // is an attended action, so the session gets a deadline and a retry.
+    const deadline = Date.now() + 3 * 60 * 1000;
+
+    function expire() {
+      stop.current = true;
+      clearTimeout(qrTimer);
+      clearInterval(stateTimer);
+      setQr(null);
+      setExpired(true);
+      setNote("انتهت مهلة الربط. اضغط «حاول مرة أخرى» لطلب رمز جديد.");
+    }
 
     async function finish() {
       if (stop.current) return;
@@ -510,6 +519,10 @@ function QrModal({
     // Green API refreshes the QR ~every 20s; poll once a second so it stays live.
     async function pollQr() {
       if (stop.current) return;
+      if (Date.now() > deadline) {
+        expire();
+        return;
+      }
       try {
         const res = await api.get<{ type: string; message: string }>(`${apiBase}/${number.id}/qr`);
         if (stop.current) return;
@@ -529,6 +542,7 @@ function QrModal({
     }
 
     async function pollState() {
+      if (stop.current) return;
       try {
         const list = await api.get<WaNumber[]>(apiBase);
         const me = list.find((n) => n.id === number.id);
@@ -545,7 +559,7 @@ function QrModal({
       clearTimeout(qrTimer);
       clearInterval(stateTimer);
     };
-  }, [number.id, onConnected]);
+  }, [apiBase, number.id, onConnected, attempt]);
 
   const title = number.label || number.instance_id;
 
@@ -554,9 +568,16 @@ function QrModal({
       title="ربط رقم واتساب"
       onClose={onClose}
       footer={
-        <button type="button" onClick={onClose} className="rounded-xl border border-slate-300 px-4 py-2.5 font-medium text-slate-600 transition hover:bg-slate-50">
-          إغلاق
-        </button>
+        <>
+          {expired && (
+            <button type="button" onClick={() => setAttempt((n) => n + 1)} className="rounded-xl bg-slate-900 px-4 py-2.5 font-medium text-white transition hover:bg-slate-800">
+              حاول مرة أخرى
+            </button>
+          )}
+          <button type="button" onClick={onClose} className="rounded-xl border border-slate-300 px-4 py-2.5 font-medium text-slate-600 transition hover:bg-slate-50">
+            إغلاق
+          </button>
+        </>
       }
     >
       <div className="flex flex-col items-center gap-4">
@@ -567,6 +588,8 @@ function QrModal({
         <div className="flex h-64 w-64 items-center justify-center rounded-2xl border-2 border-dashed border-slate-200 bg-slate-50">
           {qr ? (
             <img src={qr} alt="رمز QR" className="h-60 w-60 rounded-lg" />
+          ) : expired ? (
+            <QrCode className="h-10 w-10 text-slate-300" />
           ) : (
             <Loader2 className="h-10 w-10 animate-spin text-slate-300" />
           )}

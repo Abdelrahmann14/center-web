@@ -1,4 +1,4 @@
-import { Info } from "lucide-react";
+import { Info } from "@/components/icons";
 
 /**
  * A small "i" icon beside a title that reveals a description on hover. RTL: the

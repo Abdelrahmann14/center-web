@@ -11,13 +11,15 @@ import {
   Send,
   TrendingUp,
   XCircle,
-} from "lucide-react";
+} from "@/components/icons";
 import { api, ApiError, getFile } from "@/lib/api";
 import { toast } from "@/components/ui/toast";
 import { Modal } from "@/components/ui";
 import { LoaderBlock } from "@/components/PencilLoader";
 import { THEAD } from "@/components/tableStyles";
 import { useAuth } from "@/auth/AuthContext";
+import { useOnline } from "@/lib/useOnline";
+import { homeworkLabel } from "@/lib/homework";
 
 interface Summary {
   first_attendance: string | null;
@@ -240,7 +242,9 @@ export default function StudentAnalyticsPage() {
                               e.exam_max_score != null ? ` / ${arNum(e.exam_max_score)}` : ""
                             }`}
                       </td>
-                      <td className="px-5 py-3 text-slate-600">{e.homework_flag ?? "-"}</td>
+                      <td className="px-5 py-3 text-slate-600">
+                        {homeworkLabel(e.homework_flag) || "-"}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -255,7 +259,6 @@ export default function StudentAnalyticsPage() {
           studentId={studentId}
           studentName={student?.name ?? ""}
           hasParentPhone={(student?.parent_phones?.length ?? 0) > 0}
-          hasStudentPhone={(student?.student_phones?.length ?? 0) > 0}
           onClose={() => setExportOpen(false)}
         />
       )}
@@ -297,27 +300,27 @@ function Mini({ label, value }: { label: string; value: string }) {
 }
 
 /**
- * Generates the report, then offers the three delivery actions. Sending to a
- * parent is disabled when no parent phone is on file.
+ * Generates the report, then offers the two things anyone actually does with
+ * it: keep a copy, or send it to the guardian. Sending is disabled when no
+ * parent phone is on file.
  */
 function ExportDialog({
   studentId,
   studentName,
   hasParentPhone,
-  hasStudentPhone,
   onClose,
 }: {
   studentId: string;
   studentName: string;
   hasParentPhone: boolean;
-  hasStudentPhone: boolean;
   onClose: () => void;
 }) {
-  const [busy, setBusy] = useState<"parent" | "student" | "download" | null>(null);
+  const [busy, setBusy] = useState<"parent" | "download" | null>(null);
   // Downloading the report is part of viewing it; messaging it out is its own
   // permission, so an assistant can read the record without contacting anyone.
   const { can } = useAuth();
   const canSend = can("STUDENT_REPORT_SEND");
+  const online = useOnline();
 
   async function download() {
     setBusy("download");
@@ -340,11 +343,11 @@ function ExportDialog({
     }
   }
 
-  async function send(target: "parent" | "student") {
-    setBusy(target);
+  async function sendToParent() {
+    setBusy("parent");
     try {
-      await api.post(`/students/${studentId}/analytics/report/send/${target}`);
-      toast.success(target === "parent" ? "تم إرسال التقرير لولي الأمر" : "تم إرسال التقرير للطالب");
+      await api.post(`/students/${studentId}/analytics/report/send/parent`);
+      toast.success("تم إرسال التقرير لولي الأمر");
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : "تعذّر إرسال التقرير");
     } finally {
@@ -370,25 +373,25 @@ function ExportDialog({
         يتضمّن التقرير بيانات الطالب وتحليلات حضوره ودرجاته.
       </p>
       <div className="space-y-2">
+        {/* Two choices only: keep it, or send it to the guardian. The report
+            carries attendance and grades - it is written for whoever is
+            responsible for the student, not for the student. The server still
+            exposes a send-to-student route; nothing in the UI points at it. */}
         {canSend && (
-          <>
-            <Action
-              icon={<Send className="h-5 w-5" />}
-              label="إرسال إلى ولي الأمر"
-              hint={hasParentPhone ? "عبر واتساب" : "لا يوجد رقم هاتف لولي الأمر"}
-              disabled={!hasParentPhone}
-              busy={busy === "parent"}
-              onClick={() => send("parent")}
-            />
-            <Action
-              icon={<Send className="h-5 w-5" />}
-              label="إرسال إلى الطالب"
-              hint={hasStudentPhone ? "عبر واتساب" : "لا يوجد رقم هاتف للطالب"}
-              disabled={!hasStudentPhone}
-              busy={busy === "student"}
-              onClick={() => send("student")}
-            />
-          </>
+          <Action
+            icon={<Send className="h-5 w-5" />}
+            label="إرسال إلى ولي الأمر"
+            hint={
+              !online
+                ? "لا يوجد اتصال بالإنترنت"
+                : hasParentPhone
+                  ? "عبر واتساب"
+                  : "لا يوجد رقم هاتف لولي الأمر"
+            }
+            disabled={!hasParentPhone || !online}
+            busy={busy === "parent"}
+            onClick={sendToParent}
+          />
         )}
         <Action
           icon={<Download className="h-5 w-5" />}

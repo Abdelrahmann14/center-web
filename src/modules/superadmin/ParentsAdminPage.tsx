@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { HeartHandshake, Pencil, Loader2, Plus } from "lucide-react";
+import { HeartHandshake, Pencil, Loader2, Plus } from "@/components/icons";
 import { api, ApiError, getAllPages } from "@/lib/api";
 import { toast } from "@/components/ui/toast";
 import { Modal, Field, ConfirmDialog, FormNotice, requiredArabic, inputClass } from "@/components/ui";

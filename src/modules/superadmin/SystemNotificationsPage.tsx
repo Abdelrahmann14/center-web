@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Send, Loader2, Search, X, BellRing, MessageSquareText, History, Check, Save, Plus, Pencil, Users, Clock } from "lucide-react";
+import { Send, Loader2, Search, X, BellRing, MessageSquareText, History, Check, Save, Plus, Pencil, Users, Clock } from "@/components/icons";
 import { api, ApiError } from "@/lib/api";
 import { toast } from "@/components/ui/toast";
 import { Avatar } from "@/components/Avatar";
@@ -10,6 +10,7 @@ import { THEAD } from "@/components/tableStyles";
 import { Select, Field, Modal, ConfirmDialog, FormNotice, inputClass } from "@/components/ui";
 import { fmtDateTime } from "@/lib/datetime";
 import { AuditCell } from "@/components/AuditCell";
+import { ROLE_LABEL as ROLE_AR } from "@/lib/roles";
 
 type Tab = "notifications" | "messages";
 
@@ -20,7 +21,6 @@ const CATEGORIES = [
   { key: "FEMALE_STUDENTS", label: "الطالبات" },
 ];
 
-const ROLE_AR: Record<string, string> = { admin: "مدرّس", user: "مساعد", student: "طالب", parent: "ولي أمر" };
 
 interface UserHit { id: string; username: string; role: string; photo: string | null }
 interface Teacher { id: string; username: string }
@@ -280,7 +280,7 @@ function NotificationsTab() {
           }
         >
           <div className="space-y-6">
-            {/* Step 1 — recipients */}
+            {/* Step 1 - recipients */}
             <div className="space-y-4">
               <p className="flex items-center gap-2 text-sm font-semibold text-slate-700">
                 {stepBadge(1)} المستلمون
@@ -316,7 +316,7 @@ function NotificationsTab() {
               )}
             </div>
 
-            {/* Step 2 — content */}
+            {/* Step 2 - content */}
             <div className="space-y-4 border-t border-slate-100 pt-5">
               <p className="flex items-center gap-2 text-sm font-semibold text-slate-700">
                 {stepBadge(2)} المحتوى
@@ -333,7 +333,7 @@ function NotificationsTab() {
               </label>
             </div>
 
-            {/* Sender name — inline, no label, below the inputs. */}
+            {/* Sender name - inline, no label, below the inputs. */}
             <div className="border-t border-slate-100 pt-4">
               <SenderNameInline />
             </div>

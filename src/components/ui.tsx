@@ -1,6 +1,15 @@
-import { X, ChevronDown, Check, Coins } from "lucide-react";
-import type { ReactNode, FormEvent } from "react";
-import { createContext, useCallback, useContext, useEffect, useId, useRef, useState } from "react";
+import { X, ChevronDown, Check, Coins, Loader2 } from "@/components/icons";
+import type { ReactNode, FormEvent, CSSProperties } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import { createPortal } from "react-dom";
 
 // Shared input styling used across all forms.
@@ -146,6 +155,64 @@ export const requiredArabic = {
 };
 
 /**
+ * Anchors an open dropdown menu to its trigger while the menu itself is drawn on
+ * document.body.
+ *
+ * A menu positioned inside the flow is clipped by the nearest scrolling
+ * ancestor - which is exactly what a Modal body is - so a dropdown in a short
+ * form lost most of its options. Drawing it at the top level and placing it from
+ * the trigger's rect keeps the whole list on screen, and it flips above the
+ * trigger when the space below cannot hold a usable list.
+ *
+ * Returns the refs to hang on the trigger wrapper and the menu; an outside-click
+ * check has to test both, since the menu is no longer a descendant.
+ */
+function useAnchoredMenu(open: boolean) {
+  const anchorRef = useRef<HTMLDivElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const [style, setStyle] = useState<CSSProperties | null>(null);
+
+  useLayoutEffect(() => {
+    if (!open) {
+      setStyle(null);
+      return;
+    }
+    const place = () => {
+      const el = anchorRef.current;
+      if (!el) return;
+      const r = el.getBoundingClientRect();
+      const GAP = 6;
+      const EDGE = 12;
+      const below = window.innerHeight - r.bottom - GAP - EDGE;
+      const above = r.top - GAP - EDGE;
+      const up = below < 160 && above > below;
+      setStyle({
+        position: "fixed",
+        left: r.left,
+        width: r.width,
+        maxHeight: Math.max(Math.min(240, up ? above : below), 120),
+        ...(up ? { bottom: window.innerHeight - r.top + GAP } : { top: r.bottom + GAP }),
+      });
+    };
+    place();
+    // Capture phase: a scroll inside the modal has to move the menu too, and
+    // that scroll never reaches the window in the bubble phase.
+    window.addEventListener("scroll", place, true);
+    window.addEventListener("resize", place);
+    return () => {
+      window.removeEventListener("scroll", place, true);
+      window.removeEventListener("resize", place);
+    };
+  }, [open]);
+
+  return { anchorRef, menuRef, style };
+}
+
+/** Shared shell for a portalled dropdown list. */
+const MENU_CLASS =
+  "z-[60] overflow-y-auto rounded-xl border border-slate-200 bg-white p-1 shadow-lg animate-fade-in";
+
+/**
  * System-wide dropdown - fully custom (NOT native <select>), so BOTH the closed
  * control and the open option list are on-theme.
  */
@@ -156,6 +223,7 @@ export function Select({
   placeholder = "اختر...",
   disabled = false,
   onFocus,
+  emptyLabel = "لا توجد خيارات",
 }: {
   value: string;
   onChange: (value: string) => void;
@@ -163,9 +231,11 @@ export function Select({
   placeholder?: string;
   disabled?: boolean;
   onFocus?: () => void;
+  /** Shown inside the open menu when there are no options to pick. */
+  emptyLabel?: string;
 }) {
   const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
+  const { anchorRef, menuRef, style } = useAnchoredMenu(open);
 
   // A dropdown is a button, not an input, so the surrounding Field cannot read a
   // value off the DOM - report it instead, and drop the placeholder there since
@@ -180,7 +250,10 @@ export function Select({
   useEffect(() => {
     if (!open) return;
     function onDocClick(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+      const t = e.target as Node;
+      // The menu is portalled, so it is not inside the anchor - test both.
+      if (anchorRef.current?.contains(t) || menuRef.current?.contains(t)) return;
+      setOpen(false);
     }
     function onKey(e: KeyboardEvent) {
       if (e.key === "Escape") setOpen(false);
@@ -191,12 +264,12 @@ export function Select({
       document.removeEventListener("mousedown", onDocClick);
       document.removeEventListener("keydown", onKey);
     };
-  }, [open]);
+  }, [open, anchorRef, menuRef]);
 
   const selected = options.find((o) => o.value === value);
 
   return (
-    <div ref={ref} className="relative">
+    <div ref={anchorRef} className="relative">
       <button
         type="button"
         disabled={disabled}
@@ -222,31 +295,38 @@ export function Select({
         />
       </button>
 
-      {open && (
-        <div className="absolute z-50 mt-1.5 max-h-60 w-full overflow-y-auto rounded-xl border border-slate-200 bg-white p-1 shadow-lg animate-fade-in">
-          {options.map((o) => {
-            const isSel = o.value === value;
-            return (
-              <button
-                key={o.value}
-                type="button"
-                onClick={() => {
-                  onChange(o.value);
-                  setOpen(false);
-                }}
-                className={`flex w-full items-center justify-between gap-2 rounded-lg px-3 py-2 text-right text-sm transition ${
-                  isSel
-                    ? "bg-accent/10 font-medium text-accent"
-                    : "text-slate-700 hover:bg-slate-100"
-                }`}
-              >
-                <span>{o.label}</span>
-                {isSel && <Check className="h-4 w-4 shrink-0" />}
-              </button>
-            );
-          })}
-        </div>
-      )}
+      {open &&
+        style &&
+        createPortal(
+          <div ref={menuRef} style={style} className={MENU_CLASS}>
+            {options.length === 0 ? (
+              <div className="px-3 py-2 text-right text-sm text-slate-400">{emptyLabel}</div>
+            ) : (
+              options.map((o) => {
+                const isSel = o.value === value;
+                return (
+                  <button
+                    key={o.value}
+                    type="button"
+                    onClick={() => {
+                      onChange(o.value);
+                      setOpen(false);
+                    }}
+                    className={`flex w-full items-center justify-between gap-2 rounded-lg px-3 py-2 text-right text-sm transition ${
+                      isSel
+                        ? "bg-accent/10 font-medium text-accent"
+                        : "text-slate-700 hover:bg-slate-100"
+                    }`}
+                  >
+                    <span>{o.label}</span>
+                    {isSel && <Check className="h-4 w-4 shrink-0" />}
+                  </button>
+                );
+              })
+            )}
+          </div>,
+          document.body
+        )}
     </div>
   );
 }
@@ -264,16 +344,18 @@ export function MultiSelect({
   placeholder?: string;
 }) {
   const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
+  const { anchorRef, menuRef, style } = useAnchoredMenu(open);
 
   useEffect(() => {
     if (!open) return;
     function onDocClick(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+      const t = e.target as Node;
+      if (anchorRef.current?.contains(t) || menuRef.current?.contains(t)) return;
+      setOpen(false);
     }
     document.addEventListener("mousedown", onDocClick);
     return () => document.removeEventListener("mousedown", onDocClick);
-  }, [open]);
+  }, [open, anchorRef, menuRef]);
 
   const toggle = (v: string) =>
     onChange(value.includes(v) ? value.filter((x) => x !== v) : [...value, v]);
@@ -287,7 +369,7 @@ export function MultiSelect({
           .join("، ");
 
   return (
-    <div ref={ref} className="relative">
+    <div ref={anchorRef} className="relative">
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
@@ -298,33 +380,36 @@ export function MultiSelect({
         <span className={`truncate ${value.length ? "text-slate-800" : "text-slate-400"}`}>{label}</span>
         <ChevronDown className={`h-4 w-4 shrink-0 text-slate-400 transition-transform ${open ? "rotate-180" : ""}`} />
       </button>
-      {open && (
-        <div className="absolute z-50 mt-1.5 max-h-60 w-full overflow-y-auto rounded-xl border border-slate-200 bg-white p-1 shadow-lg animate-fade-in">
-          {options.length === 0 && (
-            <div className="px-3 py-2 text-sm text-slate-400">لا يوجد مساعدون</div>
-          )}
-          {options.map((o) => {
-            const on = value.includes(o.value);
-            return (
-              <button
-                key={o.value}
-                type="button"
-                onClick={() => toggle(o.value)}
-                className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-right text-sm text-slate-700 transition hover:bg-slate-100"
-              >
-                <span
-                  className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${
-                    on ? "border-accent bg-accent text-white" : "border-slate-300"
-                  }`}
+      {open &&
+        style &&
+        createPortal(
+          <div ref={menuRef} style={style} className={MENU_CLASS}>
+            {options.length === 0 && (
+              <div className="px-3 py-2 text-sm text-slate-400">لا يوجد مساعدون</div>
+            )}
+            {options.map((o) => {
+              const on = value.includes(o.value);
+              return (
+                <button
+                  key={o.value}
+                  type="button"
+                  onClick={() => toggle(o.value)}
+                  className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-right text-sm text-slate-700 transition hover:bg-slate-100"
                 >
-                  {on && <Check className="h-3 w-3" />}
-                </span>
-                {o.label}
-              </button>
-            );
-          })}
-        </div>
-      )}
+                  <span
+                    className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${
+                      on ? "border-accent bg-accent text-white" : "border-slate-300"
+                    }`}
+                  >
+                    {on && <Check className="h-3 w-3" />}
+                  </span>
+                  {o.label}
+                </button>
+              );
+            })}
+          </div>,
+          document.body
+        )}
     </div>
   );
 }
@@ -531,7 +616,8 @@ export function Modal({
   footer,
   size = "md",
 }: {
-  title: string;
+  /** Usually a string; a node when the heading carries a badge beside it. */
+  title: ReactNode;
   subtitle?: string;
   onClose: () => void;
   children: ReactNode;
@@ -580,29 +666,49 @@ export function ConfirmDialog({
   confirmLabel?: string;
   cancelLabel?: string;
   danger?: boolean;
-  onConfirm: () => void;
+  /** Returning a promise puts the dialog in its working state until it settles. */
+  onConfirm: () => void | Promise<unknown>;
   onClose: () => void;
 }) {
+  // The confirm click is where the work starts, so it is where the wait shows.
+  // Everything that could fire a second copy of that work is shut while it runs.
+  const [busy, setBusy] = useState(false);
+
+  async function confirm() {
+    if (busy) return;
+    const result = onConfirm();
+    if (!result || typeof (result as Promise<unknown>).then !== "function") return;
+    setBusy(true);
+    try {
+      await result;
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <Modal
       title={title}
-      onClose={onClose}
+      onClose={busy ? () => {} : onClose}
       footer={
         <>
           <button
             type="button"
             onClick={onClose}
-            className="rounded-xl border border-slate-300 px-4 py-2.5 font-medium text-slate-600 transition hover:bg-slate-50"
+            disabled={busy}
+            className="rounded-xl border border-slate-300 px-4 py-2.5 font-medium text-slate-600 transition hover:bg-slate-50 disabled:opacity-50"
           >
             {cancelLabel}
           </button>
           <button
             type="button"
-            onClick={onConfirm}
-            className={`rounded-xl px-5 py-2.5 font-medium text-white transition ${
+            onClick={confirm}
+            disabled={busy}
+            className={`flex items-center gap-2 rounded-xl px-5 py-2.5 font-medium text-white transition disabled:opacity-70 ${
               danger ? "bg-rose-600 hover:bg-rose-700" : "bg-accent hover:bg-accent-hover"
             }`}
           >
+            {busy && <Loader2 className="h-4 w-4 animate-spin" />}
             {confirmLabel}
           </button>
         </>

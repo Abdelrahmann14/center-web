@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Search, X, SlidersHorizontal } from "lucide-react";
+import { Search, X, SlidersHorizontal } from "@/components/icons";
 import { MultiSelectFilter } from "./MultiSelectFilter";
 import { Pagination } from "./Pagination";
 
@@ -117,8 +117,8 @@ export function FilterBar<T>({
   return (
     <>
       {/* Sticky enterprise filter bar */}
-      <div className="sticky top-0 z-20 -mx-6 mt-3 border-b border-slate-200 bg-white px-6 py-3">
-        {/* Row 1 — instant search + advanced settings */}
+      <div className="sticky top-0 z-20 -mx-4 mt-3 border-b border-slate-200 bg-white px-4 py-3 sm:-mx-6 sm:px-6">
+        {/* Row 1 - instant search + advanced settings */}
         <div className="flex items-center gap-3">
           <div className="relative min-w-[240px] flex-1">
             <Search className="absolute right-3 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-400" />
@@ -188,7 +188,7 @@ export function FilterBar<T>({
           )}
         </div>
 
-        {/* Row 2 — filter chips */}
+        {/* Row 2 - filter chips */}
         {shownFields.length > 0 && (
           <div className="mt-3 flex flex-wrap items-center gap-2">
             {shownFields.map((f) => (
@@ -212,7 +212,7 @@ export function FilterBar<T>({
           </div>
         )}
 
-        {/* Row 3 — active value tags */}
+        {/* Row 3 - active value tags */}
         {activeTags.length > 0 && (
           <div className="mt-2.5 flex flex-wrap gap-1.5">
             {activeTags.map((t) => (

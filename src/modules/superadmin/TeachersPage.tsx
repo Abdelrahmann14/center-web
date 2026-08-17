@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Plus, Loader2, Pencil, Users, Users2, GraduationCap, ChevronLeft } from "lucide-react";
+import { Plus, Loader2, Pencil, Users, Users2, GraduationCap, ChevronLeft } from "@/components/icons";
 import { DeleteButton } from "@/components/DeleteButton";
 import { Toggle } from "@/components/Toggle";
 import { LoginNameField } from "@/components/LoginNameField";
@@ -19,6 +19,8 @@ export interface AdminSummary {
   id: string;
   username: string;
   email: string;
+  /** WhatsApp number invoices are sent to; null until it is set. */
+  phone: string | null;
   active: boolean;
   created_at: string;
   created_by: string | null;
@@ -217,6 +219,7 @@ export function AdminForm({
   const isEdit = initial !== undefined;
   const [username, setUsername] = useState(initial?.username ?? "");
   const [loginName, setLoginName] = useState(localPartOf(initial?.email));
+  const [phone, setPhone] = useState(initial?.phone ?? "");
   const [nameTaken, setNameTaken] = useState(false);
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -233,10 +236,16 @@ export function AdminForm({
         await api.put(`/super/admins/${initial.id}`, {
           username: username.trim(),
           email: loginName,
+          phone: phone.trim(),
           ...(password ? { password } : {}),
         });
       } else {
-        await api.post("/super/admins", { username: username.trim(), email: loginName, password });
+        await api.post("/super/admins", {
+          username: username.trim(),
+          email: loginName,
+          phone: phone.trim(),
+          password,
+        });
       }
       toast.success(isEdit ? "تم تحديث بيانات المدرّس" : "تمت إضافة المدرّس");
       onSaved();
@@ -301,6 +310,20 @@ export function AdminForm({
           currentValue={localPartOf(initial?.email)}
           onTakenChange={setNameTaken}
         />
+
+        {/* The number the teacher's own invoices are sent to. Optional, but the
+            Financials screen has nowhere to deliver until it is filled in. */}
+        <Field label="رقم واتساب المدرّس" hint="بالكود الدولي، مثال: 201001234567">
+          <input
+            type="tel"
+            inputMode="numeric"
+            dir="ltr"
+            value={phone}
+            onChange={(e) => setPhone(e.target.value)}
+            maxLength={20}
+            className={`${inputClass} text-left`}
+          />
+        </Field>
 
         <Field label="كلمة المرور" hint={isEdit ? "اتركها فارغة للإبقاء على كلمة المرور الحالية" : undefined}>
           <input

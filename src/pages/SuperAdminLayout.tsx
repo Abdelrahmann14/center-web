@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
-import { LogOut, Users2, BellRing, BookOpen, ShieldCheck } from "lucide-react";
+import { LogOut, Users2, BellRing, BookOpen, ShieldCheck } from "@/components/icons";
 import { useAuth } from "@/auth/AuthContext";
 import { ConfirmDialog } from "@/components/ui";
 import { PAGE_FRAME_ID } from "@/components/PencilLoader";
@@ -30,10 +30,7 @@ export default function SuperAdminLayout() {
   const offlineToastId = useRef<string | null>(null);
   useEffect(() => {
     function onOffline() {
-      offlineToastId.current = toast.error("انقطع الاتصال بالإنترنت", {
-        title: "لا يوجد اتصال",
-        duration: Infinity,
-      });
+      offlineToastId.current = toast.error("لا يوجد اتصال", { duration: 5000 });
     }
     function onOnline() {
       if (offlineToastId.current !== null) {
@@ -89,7 +86,7 @@ export default function SuperAdminLayout() {
 
       <main id={PAGE_FRAME_ID} className="relative flex-1 overflow-auto">
         {/* key on pathname re-triggers the enter animation on every navigation. */}
-        <div key={location.pathname} className="w-full px-6 py-5 animate-page">
+        <div key={location.pathname} className="w-full px-4 py-4 animate-page sm:px-6 sm:py-5">
           <Outlet />
         </div>
       </main>

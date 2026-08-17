@@ -1,10 +1,13 @@
 import { useEffect, useState } from "react";
-import { Plus, Loader2, X, Check, AlertTriangle } from "lucide-react";
-import { api, ApiError, qs } from "@/lib/api";
+import { Plus, Loader2, X, Check, AlertTriangle } from "@/components/icons";
+import { api, ApiError, isOfflineError, qs } from "@/lib/api";
 import { dayLabel } from "@/lib/days";
 import { fmtTime } from "@/lib/datetime";
 import { useDebounced } from "@/lib/useDebounced";
+import { useOnline } from "@/lib/useOnline";
+import { useSync } from "@/sync/SyncProvider";
 import { useWhatsappCheck, type WaStatus } from "@/lib/useWhatsappCheck";
+import { NAME_MIN_PARTS, nameParts } from "@/lib/studentName";
 import { TRACK_OPTIONS, RELIGIONS, GENDERS, type TrackKind } from "@/lib/tracks";
 import { Modal, Field, Select, FieldError, FormNotice, AutocompleteInput, advanceOnEnter, inputClass } from "@/components/ui";
 import { useToast } from "@/components/Toast";
@@ -31,6 +34,7 @@ export interface Group {
   center_name: string;
   grade: string;
   is_active: boolean;
+  deleted?: boolean;
   lesson_price: number | null;
 }
 
@@ -49,6 +53,8 @@ export interface Student {
   academic_track: string | null;
   lesson_price: number | null;
   is_discounted: boolean;
+  /** Why the student pays below the center's price; null at full price. */
+  discount_reason: string | null;
   notes: string | null;
   is_active: boolean;
   /** Why the student is blocked; null while they are active. */
@@ -97,6 +103,7 @@ function PhoneList({
   errors,
   statuses,
   onFocus,
+  onBlur,
 }: {
   label: string;
   phones: string[];
@@ -104,6 +111,8 @@ function PhoneList({
   errors: (string | null)[];
   statuses?: (WaStatus | undefined)[];
   onFocus?: () => void;
+  /** Reports that the user has left this number, so its error may show. */
+  onBlur?: (index: number) => void;
 }) {
   const update = (i: number, v: string) =>
     setPhones(phones.map((p, idx) => (idx === i ? v.replace(/\D/g, "").slice(0, 11) : p)));
@@ -130,6 +139,7 @@ function PhoneList({
                   value={p}
                   onChange={(e) => update(i, e.target.value)}
                   onFocus={onFocus}
+                  onBlur={() => onBlur?.(i)}
                   required={i === 0}
                   className={`${inputClass} ${errors[i] ? "border-rose-400 focus:border-rose-400 focus:ring-rose-200" : ""}`}
                 />
@@ -192,6 +202,8 @@ export function StudentForm({
 }) {
   const isEdit = initial !== undefined;
   const toast = useToast();
+  const sync = useSync();
+  const online = useOnline();
   const activeGrades = grades.filter((g) => g.is_active || g.name === initial?.grade);
   const displaySerial = initial?.serial ?? options.next_serial;
 
@@ -204,6 +216,7 @@ export function StudentForm({
   const [track, setTrack] = useState(initial?.academic_track ?? "");
   const [religion, setReligion] = useState(initial?.religion ?? RELIGIONS[0]);
   const [price, setPrice] = useState(initial?.lesson_price != null ? String(initial.lesson_price) : "");
+  const [discountReason, setDiscountReason] = useState(initial?.discount_reason ?? "");
   const [notes, setNotes] = useState(initial?.notes ?? "");
   // Blocking keeps the student on file; only registration is barred. New
   // students always start active.
@@ -218,32 +231,42 @@ export function StudentForm({
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
   const [attempted, setAttempted] = useState(false);
+  /** Fields the user has entered and left. Drives the on-blur validation. */
+  const [touched, setTouched] = useState<Record<string, boolean>>({});
   const [allowDup, setAllowDup] = useState(false);
-  const [reached, setReached] = useState(0);
 
-  // WhatsApp lookup per number. Every number shows an indicator; the FIRST parent
-  // number must be on WhatsApp (it receives codes), the rest are optional.
+  // WhatsApp lookup per number - informational only. Every number shows an
+  // indicator (on/off WhatsApp), but being off WhatsApp never blocks saving.
   const studentWa = useWhatsappCheck(studentPhones);
   const parentWa = useWhatsappCheck(parentPhones);
   const studentWaStatuses = studentPhones.map((p) => studentWa[digitsOnly(p)]);
   const parentWaStatuses = parentPhones.map((p) => parentWa[digitsOnly(p)]);
 
+  // Two kinds of error, revealed at different moments.
+  //
+  // A CONTENT error (a name that is not four parts, a phone missing a digit, a
+  // price above the center's) appears as soon as the user leaves that field, so
+  // they learn about it beside the field they just filled rather than at the end.
+  //
+  // "مطلوب" waits for Save. Flagging an empty field the moment focus leaves it
+  // would paint the form red as the user tabs through it - they have not failed
+  // to fill it in, they have not reached it yet.
   const O = {
     name: 1, school: 2, city: 3, grade: 4, track: 5, group: 6,
-    gender: 7, religion: 8, price: 9, sphone: 10, pphone: 11, notes: 12,
+    gender: 7, religion: 8, price: 9, discount: 10, sphone: 11, pphone: 12, notes: 13,
   };
-  const reach = (o: number) => setReached((r) => (o > r ? o : r));
-  const showFor = (o: number) => attempted || reached > o;
-  const req = (o: number, v: string) => (showFor(o) && !v.trim() ? "مطلوب" : null);
+  const touch = (key: string) => setTouched((t) => (t[key] ? t : { ...t, [key]: true }));
+  const showContent = (key: string) => touched[key] === true || attempted;
+  const req = (_o: number, v: string) => (attempted && !v.trim() ? "مطلوب" : null);
 
   const trackKind: TrackKind = grades.find((g) => g.name === grade)?.track_kind ?? "none";
   const trackOptions = TRACK_OPTIONS[trackKind];
-  const groupOptions = groups.filter((g) => g.grade === grade);
+  const groupOptions = groups.filter((g) => g.grade === grade && !g.deleted);
 
   const selectedGroup = groups.find((g) => g.id === groupId);
   const centerPrice = selectedGroup?.lesson_price ?? null;
   const priceNum = price === "" ? null : Number(price);
-  const priceError =
+  const priceErrorRaw =
     centerPrice != null && priceNum != null && priceNum > centerPrice
       ? "لا يمكن أن يكون السعر أعلى من سعر السنتر"
       : null;
@@ -285,8 +308,27 @@ export function StudentForm({
   const schoolSuggestions = options.schools;
   const citySuggestions = options.cities;
 
-  const nameErrorRaw = name.trim() && dup.name_taken ? "الاسم مستخدم لطالب آخر" : null;
-  const nameError = showFor(O.name) ? nameErrorRaw ?? req(O.name, name) : null;
+  // Two parts save; four is the complete Egyptian name. A short name is no
+  // longer an error - it used to be, and the only way past was to invent a word,
+  // which is worse data than a genuinely short name. It is a NOTE instead, and
+  // the record shows as "بيانات ناقصة" on the students page until it is filled in.
+  const parts = nameParts(name);
+  const nameErrorRaw = name.trim()
+    ? dup.name_taken
+      ? "الاسم مستخدم لطالب آخر"
+      : parts < NAME_MIN_PARTS
+        ? "اكتب اسم الطالب من مقطعين على الأقل"
+        : null
+    : null;
+  const nameError = nameErrorRaw ? (showContent("name") ? nameErrorRaw : null) : req(O.name, name);
+
+  // A discount must be justified: at least 10 characters, only when discounted.
+  const discountReasonErrorRaw =
+    discounted && discountReason.trim().length < 10
+      ? "اذكر سبب الخصم (١٠ أحرف على الأقل)"
+      : null;
+  const discountReasonError = showContent("discount") ? discountReasonErrorRaw : null;
+  const priceError = showContent("price") ? priceErrorRaw : null;
 
   const spAllEmpty = studentPhones.every((p) => !digitsOnly(p));
   const ppAllEmpty = parentPhones.every((p) => !digitsOnly(p));
@@ -304,12 +346,19 @@ export function StudentForm({
     if (!d) return i === 0 && ppAllEmpty ? "مطلوب" : null;
     if (d.length !== MIN_DIGITS) return `${MIN_DIGITS} أرقام`;
     if (parentPhones.filter((x) => digitsOnly(x) === d).length > 1) return "رقم مكرر";
-    // The first parent number must be on WhatsApp (extra numbers may not be).
-    if (i === 0 && parentWa[d] === "no") return "الرقم الأول يجب أن يكون على واتساب";
+    // WhatsApp is NOT required: a number off WhatsApp still saves. The tag under
+    // the field just says so; it never blocks the form.
     return null;
   });
-  const studentPhoneErrors = studentPhoneRaw.map((e) => (showFor(O.sphone) ? e : null));
-  const parentPhoneErrors = parentPhoneRaw.map((e) => (showFor(O.pphone) ? e : null));
+  // "مطلوب" on the first number still waits for Save; anything else about a
+  // number the user has typed and left shows straight away.
+  const phoneError = (raw: string | null, key: string) => {
+    if (raw === null) return null;
+    if (raw === "مطلوب") return attempted ? raw : null;
+    return showContent(key) ? raw : null;
+  };
+  const studentPhoneErrors = studentPhoneRaw.map((e, i) => phoneError(e, `sphone${i}`));
+  const parentPhoneErrors = parentPhoneRaw.map((e, i) => phoneError(e, `pphone${i}`));
 
   const hasDupOwner = studentPhones.some((p) => {
     const d = digitsOnly(p);
@@ -326,11 +375,12 @@ export function StudentForm({
     setTrack("");
     setReligion(RELIGIONS[0]);
     setPrice("");
+    setDiscountReason("");
     setNotes("");
     setStudentPhones([""]);
     setParentPhones([""]);
     setAttempted(false);
-    setReached(0);
+    setTouched({});
     setAllowDup(false);
   }
 
@@ -350,7 +400,8 @@ export function StudentForm({
   const realPhoneErr = (e: string | null) => !!e && e !== "مطلوب";
   const hasFieldErrors =
     !!nameErrorRaw ||
-    !!priceError ||
+    !!priceErrorRaw ||
+    !!discountReasonErrorRaw ||
     studentPhoneRaw.some(realPhoneErr) ||
     parentPhoneRaw.some(realPhoneErr);
 
@@ -385,14 +436,70 @@ export function StudentForm({
       religion,
       academic_track: trackOptions.length > 0 ? track : null,
       lesson_price: priceNum,
+      discount_reason: discounted ? discountReason.trim() : null,
       notes: notes.trim() || null,
       is_active: active,
       block_reason: active ? null : blockReason.trim() || null,
       allow_duplicate_phone: allowDup,
     };
 
+    // The optimistic record shown at once and mirrored locally when offline. The
+    // server assigns the real serial on sync (this is the best guess meanwhile),
+    // and keeps the client's id, so the row the user saw becomes the server row.
+    const now = new Date().toISOString();
+    const optimistic: Record<string, unknown> = {
+      id: initial?.id ?? "",
+      serial: displaySerial,
+      name: payload.name,
+      grade,
+      school: payload.school,
+      city: payload.city,
+      gender,
+      group_id: groupId,
+      student_phones: sp,
+      parent_phones: pp,
+      religion,
+      academic_track: payload.academic_track,
+      lesson_price: priceNum,
+      is_discounted: discounted,
+      discount_reason: payload.discount_reason,
+      notes: payload.notes,
+      is_active: active,
+      block_reason: payload.block_reason,
+      registered: initial?.registered ?? false,
+      google_synced: initial?.google_synced ?? false,
+      created_at: initial?.created_at ?? now,
+      created_by: initial?.created_by ?? null,
+      updated_at: now,
+      updated_by: null,
+    };
+
+    // Queue the create/edit locally and show it immediately - it replays to the
+    // server (same validation + duplicate rules) once the connection is back.
+    async function saveOffline() {
+      const saved = (await sync.queueStudent(
+        payload,
+        optimistic,
+        isEdit ? initial!.id : undefined,
+      )) as unknown as Student;
+      onSaved(saved, isEdit);
+      if (isEdit) {
+        toast(`تم تحديث بيانات "${saved.name}" - بانتظار المزامنة`);
+        onClose();
+      } else {
+        reset();
+        toast(`تمت إضافة "${saved.name}" - بانتظار المزامنة عند عودة الاتصال`);
+      }
+    }
+
     setSaving(true);
     try {
+      // Offline the request would hang on a dead connection before failing, so
+      // queue straight away instead of waiting for it to time out.
+      if (!online && sync.ready) {
+        await saveOffline();
+        return;
+      }
       const saved = isEdit
         ? await api.put<Student>(`/students/${initial.id}`, payload)
         : await api.post<Student>("/students", payload);
@@ -405,7 +512,17 @@ export function StudentForm({
         toast(`تمت إضافة "${saved.name}"`);
       }
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "تعذّر حفظ الطالب");
+      // The request never reached the server (offline / connection dropped):
+      // queue it rather than showing a misleading error like a permission denial.
+      if (isOfflineError(err) && sync.ready) {
+        try {
+          await saveOffline();
+        } catch {
+          setError("تعذّر حفظ الطالب دون اتصال");
+        }
+      } else {
+        setError(err instanceof ApiError ? err.message : "تعذّر حفظ الطالب");
+      }
     } finally {
       setSaving(false);
     }
@@ -414,7 +531,18 @@ export function StudentForm({
   return (
     <Modal
       size="3xl"
-      title={isEdit ? "تعديل طالب" : "إضافة طالب"}
+      /* The student's number belongs beside the heading, not inside the name
+         field: it is what this record IS, not something being typed into it.
+         Drawn as a tinted plate in the brand navy rather than a solid chip -
+         it is a fact about the record, not a warning. */
+      title={
+        <span className="flex flex-wrap items-center gap-2.5">
+          {isEdit ? "تعديل طالب" : "إضافة طالب"}
+          <span className="font-ledger rounded-lg border border-dark/15 bg-dark/8 px-2.5 py-1 text-sm font-semibold text-dark/75">
+            {displaySerial}
+          </span>
+        </span>
+      }
       onClose={onClose}
       footer={
         <>
@@ -425,10 +553,12 @@ export function StudentForm({
           >
             إغلاق
           </button>
+          {/* Never disabled by validation: pressing Save is what reveals the
+              required-field errors. handleSubmit blocks the actual create. */}
           <button
             type="submit"
             form="student-form"
-            disabled={saving || hasFieldErrors}
+            disabled={saving}
             className="flex items-center justify-center gap-2 rounded-xl bg-accent px-5 py-2.5 font-medium text-white transition hover:bg-accent-hover disabled:opacity-60"
           >
             {saving ? <Loader2 className="h-5 w-5 animate-spin" /> : <Plus className="h-5 w-5" />}
@@ -445,21 +575,21 @@ export function StudentForm({
         className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3"
       >
         <div className="sm:col-span-2 lg:col-span-3">
-          <Field label="الاسم بالكامل" filled={!!name} hint="بالحروف العربية فقط">
+          {/* No hint: the field takes Arabic letters only by construction (the
+              input sanitises anything else away), and a short name is reported
+              where it matters - the students page flags the record as
+              "بيانات ناقصة" - rather than nagging while it is being typed. */}
+          <Field label="الاسم بالكامل" filled={!!name}>
             <FieldError message={nameError} />
             <input
               type="text"
               value={name}
               onChange={(e) => setName(sanitizeName(e.target.value))}
-              onFocus={() => reach(O.name)}
+              onBlur={() => touch("name")}
               required
               autoFocus
-              className={`${inputClass} pl-16 ${nameError ? "border-rose-400 focus:border-rose-400 focus:ring-rose-200" : ""}`}
+              className={`${inputClass} ${nameError ? "border-rose-400 focus:border-rose-400 focus:ring-rose-200" : ""}`}
             />
-            {/* Serial rides inside the field now that the label row is gone. */}
-            <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 rounded-md bg-rose-600 px-1.5 py-0.5 text-[11px] font-medium text-white">
-              # {displaySerial}
-            </span>
           </Field>
         </div>
 
@@ -468,18 +598,16 @@ export function StudentForm({
           <AutocompleteInput
             value={school}
             onChange={setSchool}
-            onFocus={() => reach(O.school)}
             suggestions={schoolSuggestions}
             error={!!req(O.school, school)}
           />
         </Field>
 
-        <Field label="المدينة" filled={!!city}>
+        <Field label="المنطقة السكنية" filled={!!city}>
           <FieldError message={req(O.city, city)} />
           <AutocompleteInput
             value={city}
             onChange={setCity}
-            onFocus={() => reach(O.city)}
             suggestions={citySuggestions}
             error={!!req(O.city, city)}
           />
@@ -488,13 +616,12 @@ export function StudentForm({
         <Field
           label="الصف"
           filled={!!grade}
-          hint={activeGrades.length === 0 ? "لا توجد صفوف - أضفها من لوحة المدير" : undefined}
+          hint={activeGrades.length === 0 ? "لا توجد صفوف - أضفها من لوحة المدرّس" : undefined}
         >
           <FieldError message={req(O.grade, grade)} />
           <Select
             value={grade}
             onChange={onGradeChange}
-            onFocus={() => reach(O.grade)}
             disabled={activeGrades.length === 0}
             placeholder=""
             options={activeGrades.map((g) => ({ value: g.name, label: g.name }))}
@@ -507,7 +634,6 @@ export function StudentForm({
             <Select
               value={track}
               onChange={setTrack}
-              onFocus={() => reach(O.track)}
               placeholder=""
               options={trackOptions.map((t) => ({ value: t, label: t }))}
             />
@@ -523,7 +649,6 @@ export function StudentForm({
           <Select
             value={groupId}
             onChange={onGroupChange}
-            onFocus={() => reach(O.group)}
             disabled={groupOptions.length === 0}
             placeholder=""
             options={groupOptions.map((g) => ({ value: g.id, label: groupLabel(g) }))}
@@ -534,7 +659,6 @@ export function StudentForm({
           <Select
             value={gender}
             onChange={setGender}
-            onFocus={() => reach(O.gender)}
             placeholder=""
             options={GENDERS.map((g) => ({ value: g, label: g }))}
           />
@@ -544,7 +668,6 @@ export function StudentForm({
           <Select
             value={religion}
             onChange={setReligion}
-            onFocus={() => reach(O.religion)}
             placeholder=""
             options={RELIGIONS.map((r) => ({ value: r, label: r }))}
           />
@@ -563,7 +686,7 @@ export function StudentForm({
             max={centerPrice ?? undefined}
             value={price}
             onChange={(e) => setPrice(e.target.value)}
-            onFocus={() => reach(O.price)}
+            onBlur={() => touch("price")}
             className={`${inputClass} ${priceError ? "border-rose-400 focus:border-rose-400 focus:ring-rose-200" : ""}`}
           />
           {priceNum === 0 ? (
@@ -579,6 +702,23 @@ export function StudentForm({
           )}
         </Field>
 
+        {/* Appears only when the price is below the center's - a discount must
+            be justified, at least 10 characters. */}
+        {discounted && (
+          <div className="sm:col-span-2 lg:col-span-3">
+            <Field label="سبب الخصم" filled={!!discountReason} multiline>
+              <FieldError message={discountReasonError} />
+              <textarea
+                value={discountReason}
+                onChange={(e) => setDiscountReason(e.target.value)}
+                onBlur={() => touch("discount")}
+                rows={2}
+                className={`${inputClass} ${discountReasonError ? "border-rose-400 focus:border-rose-400 focus:ring-rose-200" : ""}`}
+              />
+            </Field>
+          </div>
+        )}
+
         <div className="sm:col-span-2 lg:col-span-3">
           <PhoneList
             label="هاتف الطالب"
@@ -586,7 +726,7 @@ export function StudentForm({
             setPhones={setStudentPhones}
             errors={studentPhoneErrors}
             statuses={studentWaStatuses}
-            onFocus={() => reach(O.sphone)}
+            onBlur={(i) => touch(`sphone${i}`)}
           />
           {hasDupOwner && (
             <label className="mt-2 flex cursor-pointer items-center gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
@@ -607,7 +747,7 @@ export function StudentForm({
             setPhones={setParentPhones}
             errors={parentPhoneErrors}
             statuses={parentWaStatuses}
-            onFocus={() => reach(O.pphone)}
+            onBlur={(i) => touch(`pphone${i}`)}
           />
         </div>
 
@@ -643,7 +783,6 @@ export function StudentForm({
             <textarea
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
-              onFocus={() => reach(O.notes)}
               rows={2}
               className={inputClass}
             />

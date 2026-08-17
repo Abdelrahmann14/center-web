@@ -1,9 +1,15 @@
-// Connectivity from the browser: navigator.onLine plus the online/offline events.
+// The NetworkMonitor port over the browser's connectivity signals. `navigator.
+// onLine` plus the window `online`/`offline` events is all Chrome gives us - it
+// reports the OS link state, not whether our server is reachable, so a pass can
+// still fail on a live-but-useless connection. That is fine: the engine treats a
+// failed pass as a retry-with-backoff, and a real disconnect flips this to
+// offline and pauses the passes entirely.
 import type { NetworkMonitor } from "@center/core";
 
 export class BrowserNetworkMonitor implements NetworkMonitor {
   isOnline(): boolean {
-    return navigator.onLine;
+    // Default to online when the API is missing rather than stranding writes.
+    return typeof navigator === "undefined" ? true : navigator.onLine;
   }
 
   subscribe(listener: (online: boolean) => void): () => void {

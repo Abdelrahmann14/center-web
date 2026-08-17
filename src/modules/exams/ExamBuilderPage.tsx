@@ -5,7 +5,7 @@
 // choices, checks the score distribution, and replaces the exam's question set.
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { ArrowRight, Award, Check, Loader2, Plus, Settings2, StickyNote, Trash2 } from "lucide-react";
+import { ArrowRight, Award, Check, Loader2, Plus, Settings2, StickyNote, Trash2 } from "@/components/icons";
 import { api, ApiError } from "@/lib/api";
 import { invalidate } from "@/lib/dataCache";
 import { useToast } from "@/components/Toast";

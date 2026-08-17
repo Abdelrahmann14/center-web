@@ -35,16 +35,62 @@ function subscribe(path: string, fn: () => void) {
   };
 }
 
+/**
+ * Most entries the cache keeps.
+ *
+ * Keys are full URLs, so every distinct search string - and every page of it -
+ * is its own entry, and nothing ever removed one. A shift at the registration
+ * desk searching for fifty students left fifty result sets, each up to twenty
+ * pages of five hundred rows, alive in the tab until someone reloaded it. That
+ * was the app's one real source of unbounded memory growth: a long-lived tab
+ * got heavier all day and never gave anything back.
+ *
+ * A count rather than a byte budget, because row size is not something this
+ * layer can measure honestly. Two hundred is far more than any screen holds at
+ * once, and an evicted key just refetches - it was stale anyway.
+ */
+const MAX_ENTRIES = 200;
+
+/**
+ * Move a key to the end of the Map, so insertion order doubles as recency.
+ * This is what makes eviction least-recently-USED rather than oldest-fetched:
+ * a key the UI keeps reading survives however old its data is.
+ */
+function touch(path: string, entry: Entry) {
+  store.delete(path);
+  store.set(path, entry);
+}
+
+/**
+ * Drop the least recently used entries once the cache is over its cap.
+ *
+ * Two kinds are never evicted: one with a live subscriber (it is on screen now,
+ * and dropping it would blank a rendered table) and one with a request in
+ * flight (its promise is what a concurrent caller is already awaiting).
+ */
+function evictIfCrowded() {
+  if (store.size <= MAX_ENTRIES) return;
+  for (const [key, entry] of store) {
+    if (store.size <= MAX_ENTRIES) break;
+    if ((subs.get(key)?.size ?? 0) > 0 || entry.promise) continue;
+    store.delete(key);
+  }
+}
+
 /** Fetch through the cache. Returns cached data unless `force`, then refreshes. */
 export async function cachedGet<T>(path: string, force = false): Promise<T> {
   const e = store.get(path);
-  if (!force && e && e.data !== undefined) return e.data as T;
+  if (!force && e && e.data !== undefined) {
+    touch(path, e);
+    return e.data as T;
+  }
   if (e?.promise) return e.promise as Promise<T>;
 
   const promise = api
     .get<T>(path)
     .then((data) => {
       store.set(path, { data, ts: Date.now() });
+      evictIfCrowded();
       notify(path);
       return data;
     })
@@ -59,8 +105,13 @@ export async function cachedGet<T>(path: string, force = false): Promise<T> {
   return promise;
 }
 
-/** Server-side cap on one page (spring.data.web.pageable.max-page-size). */
-const MAX_PAGE_SIZE = 500;
+/**
+ * Server-side cap on one page (spring.data.web.pageable.max-page-size).
+ *
+ * Must match that setting. It sat at 500 while the server allowed 2000, so
+ * every full read asked for four times as many pages as it needed to.
+ */
+const MAX_PAGE_SIZE = 2000;
 
 /**
  * Reads EVERY page of a paged endpoint and returns the rows as one array.
@@ -73,6 +124,25 @@ const MAX_PAGE_SIZE = 500;
  * `path` carries the endpoint's own query string (search, sort, ...) without
  * page/size - those are appended here.
  */
+/**
+ * Most pages this will ever request, and how many at a time.
+ *
+ * The remaining pages used to go out in ONE `Promise.all`, so a large workspace
+ * fired every page at once - concurrent scans against a connection pool of
+ * eight, from a single browser, on every debounced keystroke. Six at a time
+ * keeps the wall clock close to the parallel version while leaving the pool room
+ * to serve everyone else. It matters less now that a page holds 2,000 rows and
+ * most workspaces fit in one or two, but the cap is what makes that true rather
+ * than lucky.
+ *
+ * The page cap is a guard rail, not a feature: nothing in the product is meant
+ * to display 10,000 rows at once, and quietly truncating is better than the
+ * browser stalling on a dataset it cannot render. It is logged when it bites so
+ * a real workspace outgrowing it is visible rather than silent.
+ */
+const MAX_PAGES = 20;
+const PAGE_CONCURRENCY = 6;
+
 export async function cachedGetAll<T>(path: string, force = false): Promise<T[]> {
   const url = (page: number) =>
     `${path}${path.includes("?") ? "&" : "?"}page=${page}&size=${MAX_PAGE_SIZE}`;
@@ -80,9 +150,22 @@ export async function cachedGetAll<T>(path: string, force = false): Promise<T[]>
   const first = await cachedGet<Page<T>>(url(0), force);
   if (first.total_pages <= 1) return first.content;
 
-  const rest = await Promise.all(
-    Array.from({ length: first.total_pages - 1 }, (_, i) => cachedGet<Page<T>>(url(i + 1), force)),
-  );
+  const pages = Math.min(first.total_pages, MAX_PAGES);
+  if (first.total_pages > MAX_PAGES) {
+    console.warn(
+      `cachedGetAll: ${path} has ${first.total_pages} pages; reading the first ${MAX_PAGES}. ` +
+        "This view needs server-side filtering rather than a full download.",
+    );
+  }
+
+  const rest: Page<T>[] = [];
+  for (let from = 1; from < pages; from += PAGE_CONCURRENCY) {
+    const batch = Array.from(
+      { length: Math.min(PAGE_CONCURRENCY, pages - from) },
+      (_, i) => cachedGet<Page<T>>(url(from + i), force),
+    );
+    rest.push(...(await Promise.all(batch)));
+  }
   return [first, ...rest].flatMap((p) => p.content);
 }
 

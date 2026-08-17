@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Plus, Loader2, Pencil, GraduationCap, Save } from "lucide-react";
+import { Plus, Loader2, Pencil, GraduationCap, Save } from "@/components/icons";
 import { api, ApiError } from "@/lib/api";
 import { toast } from "@/components/ui/toast";
 import { Toggle } from "@/components/Toggle";
