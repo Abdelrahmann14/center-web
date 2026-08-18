@@ -15,7 +15,7 @@ import {
   MessageCircleOff,
 } from "@/components/icons";
 import { THEAD } from "@/components/tableStyles";
-import { RowActionsMenu } from "@/components/RowActionsMenu";
+import { RowActionsMenu, type RowAction } from "@/components/RowActionsMenu";
 import { Pagination } from "@/components/Pagination";
 import { api, ApiError, isOfflineError, qs } from "@/lib/api";
 import { useOnline } from "@/lib/useOnline";
@@ -60,6 +60,8 @@ export default function StudentsPage() {
   const sync = useSync();
   const online = useOnline();
   const canCreate = can("STUDENT_CREATE");
+  const canUpdate = can("STUDENT_UPDATE");
+  const canDelete = can("STUDENT_DELETE");
   const canAnalytics = can("STUDENT_ANALYTICS");
   // Same permission the server puts on POST /students/{id}/barcode/send.
   const canSendBarcode = can("STUDENT_REPORT_SEND");
@@ -590,6 +592,51 @@ export default function StudentsPage() {
                 {visibleRows.map((s) => {
                   const g = s.group_id ? groupById.get(s.group_id) : undefined;
                   const missing = incomplete(s);
+                  // Each action is gated by its own permission, so a view-only
+                  // assistant sees none of them - and then the menu button itself
+                  // is hidden rather than opening on an empty list.
+                  const rowActions: RowAction[] = [
+                    ...(canSendBarcode
+                      ? [
+                          {
+                            key: "barcode",
+                            label: sendingBarcode === s.id ? "جارٍ الإرسال…" : "إرسال الباركود",
+                            icon: sendingBarcode === s.id ? Loader2 : Barcode,
+                            onSelect: () => sendBarcode(s),
+                            disabled: sendingBarcode === s.id || !online || s.student_phones.length === 0,
+                            title: !online
+                              ? "لا يوجد اتصال بالإنترنت"
+                              : s.student_phones.length === 0
+                                ? "لا يوجد رقم هاتف للطالب"
+                                : "إرسال الباركود للطالب عبر واتساب",
+                          },
+                        ]
+                      : []),
+                    ...(canAnalytics
+                      ? [
+                          {
+                            key: "analytics",
+                            label: "تقرير الطالب",
+                            icon: FileChartColumn,
+                            onSelect: () => navigate(`/students/${s.id}/analytics`),
+                          },
+                        ]
+                      : []),
+                    ...(canUpdate
+                      ? [{ key: "edit", label: "تعديل", icon: Pencil, onSelect: () => setEditStudent(s) }]
+                      : []),
+                    ...(canDelete
+                      ? [
+                          {
+                            key: "delete",
+                            label: "حذف",
+                            icon: Trash2,
+                            onSelect: () => setConfirmDelete(s),
+                            danger: true,
+                          },
+                        ]
+                      : []),
+                  ];
                   return (
                     <tr
                       key={s.id}
@@ -690,45 +737,7 @@ export default function StudentsPage() {
                       {/* One menu instead of a strip of icons: every action
                           keeps its name and the column keeps its width. */}
                       <td className="px-2" onClick={(e) => e.stopPropagation()}>
-                        <RowActionsMenu
-                          actions={[
-                            ...(canSendBarcode
-                              ? [
-                                  {
-                                    key: "barcode",
-                                    label: sendingBarcode === s.id ? "جارٍ الإرسال…" : "إرسال الباركود",
-                                    icon: sendingBarcode === s.id ? Loader2 : Barcode,
-                                    onSelect: () => sendBarcode(s),
-                                    disabled:
-                                      sendingBarcode === s.id || !online || s.student_phones.length === 0,
-                                    title: !online
-                                      ? "لا يوجد اتصال بالإنترنت"
-                                      : s.student_phones.length === 0
-                                        ? "لا يوجد رقم هاتف للطالب"
-                                        : "إرسال الباركود للطالب عبر واتساب",
-                                  },
-                                ]
-                              : []),
-                            ...(canAnalytics
-                              ? [
-                                  {
-                                    key: "analytics",
-                                    label: "تقرير الطالب",
-                                    icon: FileChartColumn,
-                                    onSelect: () => navigate(`/students/${s.id}/analytics`),
-                                  },
-                                ]
-                              : []),
-                            { key: "edit", label: "تعديل", icon: Pencil, onSelect: () => setEditStudent(s) },
-                            {
-                              key: "delete",
-                              label: "حذف",
-                              icon: Trash2,
-                              onSelect: () => setConfirmDelete(s),
-                              danger: true,
-                            },
-                          ]}
-                        />
+                        {rowActions.length > 0 && <RowActionsMenu actions={rowActions} />}
                       </td>
                     </tr>
                   );
