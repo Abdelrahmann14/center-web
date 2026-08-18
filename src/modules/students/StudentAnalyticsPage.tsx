@@ -87,6 +87,9 @@ export default function StudentAnalyticsPage() {
   const [student, setStudent] = useState<StudentLite | null>(null);
   const [loading, setLoading] = useState(true);
   const [exportOpen, setExportOpen] = useState(false);
+  // The report is generated, downloaded and sent server-side - none of it works
+  // offline, so the whole export entry is shut off with no connection.
+  const online = useOnline();
 
   useEffect(() => {
     let cancelled = false;
@@ -138,7 +141,9 @@ export default function StudentAnalyticsPage() {
           {data?.has_data && (
             <button
               onClick={() => setExportOpen(true)}
-              className="flex items-center gap-2 rounded-xl bg-accent px-4 py-2.5 text-sm font-medium text-white transition hover:bg-accent-hover"
+              disabled={!online}
+              title={!online ? "لا يوجد اتصال بالإنترنت" : undefined}
+              className="flex items-center gap-2 rounded-xl bg-accent px-4 py-2.5 text-sm font-medium text-white transition hover:bg-accent-hover disabled:opacity-60"
             >
               <FileText className="h-4 w-4" />
               تصدير PDF
@@ -396,7 +401,8 @@ function ExportDialog({
         <Action
           icon={<Download className="h-5 w-5" />}
           label="تنزيل الملف"
-          hint="يُحفظ باسم الطالب"
+          hint={online ? "يُحفظ باسم الطالب" : "لا يوجد اتصال بالإنترنت"}
+          disabled={!online}
           busy={busy === "download"}
           onClick={download}
         />

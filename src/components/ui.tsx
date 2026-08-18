@@ -125,10 +125,13 @@ export function Field({
           {children}
           <label
             // Lifted clear of the border rather than sitting on it - at -top-2
-            // the label read as part of the control instead of a label.
-            className={`pointer-events-none absolute right-3 z-10 bg-white px-1 font-medium leading-none transition-all duration-150 ease-out ${
+            // the label read as part of the control instead of a label. The white
+            // background only paints once the label is lifted, where it cuts the
+            // notch in the border; at rest it sits transparent over the input fill
+            // (a white patch there showed as an ugly box against the slate-50 fill).
+            className={`pointer-events-none absolute right-3 z-10 px-1 font-medium leading-none transition-all duration-150 ease-out ${
               up
-                ? "-top-2.5 text-xs"
+                ? "-top-2.5 bg-white text-xs"
                 : asTextarea
                   ? "top-3 text-sm"
                   : "top-1/2 -translate-y-1/2 text-sm"

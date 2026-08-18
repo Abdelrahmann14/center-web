@@ -1,11 +1,7 @@
-import { useState, type ReactNode } from "react";
-import { Ban, Coins, Loader2, Send } from "@/components/icons";
+import { type ReactNode } from "react";
+import { Ban, Coins } from "@/components/icons";
 import { Modal } from "@/components/ui";
 import { AuditCell } from "@/components/AuditCell";
-import { api, ApiError } from "@/lib/api";
-import { toast } from "@/components/ui/toast";
-import { useAuth } from "@/auth/AuthContext";
-import { useOnline } from "@/lib/useOnline";
 import { groupLabel, type Student, type Group } from "./StudentForm";
 
 /**
@@ -25,24 +21,7 @@ export function StudentDetails({
   hasMobileApp: boolean;
   onClose: () => void;
 }) {
-  const { can } = useAuth();
-  const canSend = can("STUDENT_REPORT_SEND");
-  const online = useOnline();
-  const [sending, setSending] = useState(false);
   const group = student.group_id ? groups.find((g) => g.id === student.group_id) : undefined;
-  const hasStudentPhone = student.student_phones.length > 0;
-
-  async function sendBarcode() {
-    setSending(true);
-    try {
-      await api.post(`/students/${student.id}/barcode/send`);
-      toast.success("تم إرسال الباركود للطالب عبر واتساب");
-    } catch (err) {
-      toast.error(err instanceof ApiError ? err.message : "تعذّر إرسال الباركود");
-    } finally {
-      setSending(false);
-    }
-  }
 
   return (
     <Modal
@@ -51,33 +30,13 @@ export function StudentDetails({
       subtitle={`كود الطالب: ${student.serial}`}
       onClose={onClose}
       footer={
-        <>
-          {canSend && (
-            <button
-              type="button"
-              onClick={sendBarcode}
-              disabled={sending || !hasStudentPhone || !online}
-              title={
-                !online
-                  ? "لا يوجد اتصال بالإنترنت"
-                  : hasStudentPhone
-                    ? "إرسال الباركود عبر واتساب"
-                    : "لا يوجد رقم هاتف للطالب"
-              }
-              className="flex items-center gap-2 rounded-xl bg-accent px-4 py-2.5 font-medium text-white transition hover:bg-accent-hover disabled:opacity-60"
-            >
-              {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-              إرسال الباركود
-            </button>
-          )}
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-xl border border-slate-300 px-4 py-2.5 font-medium text-slate-600 transition hover:bg-slate-50"
-          >
-            إغلاق
-          </button>
-        </>
+        <button
+          type="button"
+          onClick={onClose}
+          className="rounded-xl border border-slate-300 px-4 py-2.5 font-medium text-slate-600 transition hover:bg-slate-50"
+        >
+          إغلاق
+        </button>
       }
     >
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
