@@ -10,6 +10,8 @@ import {
   Pencil,
   Trash2,
   Users,
+  Users2,
+  Copy,
   SlidersHorizontal,
   Plus,
   MessageCircleOff,
@@ -25,7 +27,6 @@ import { cachedGet, cachedGetAll, invalidate } from "@/lib/dataCache";
 import { useDebounced } from "@/lib/useDebounced";
 import { AuditCell } from "@/components/AuditCell";
 import { usePageState } from "@/lib/pageState";
-import { TRACK_OPTIONS } from "@/lib/tracks";
 import { useAuth } from "@/auth/AuthContext";
 import { useBarcodeScanner } from "@/lib/useBarcodeScanner";
 import {
@@ -33,7 +34,7 @@ import {
   matchesStudentSearch,
   searchModeLabel,
 } from "@/lib/studentSearch";
-import { isFullName } from "@/lib/studentName";
+import { isIncomplete } from "./incompleteFields";
 import { MultiSelectFilter } from "@/components/MultiSelectFilter";
 import { Select, ConfirmDialog, Money } from "@/components/ui";
 import { LoaderBlock } from "@/components/PencilLoader";
@@ -130,6 +131,10 @@ export default function StudentsPage() {
   // `whatsappMissing` narrows the query to everyone whose numbers are known NOT
   // to be on WhatsApp - a server-side fact, kept in the workspace's number cache.
   const [waMissingOnly, setWaMissingOnly] = useState(false);
+  // Client-side toggles over the loaded dataset: show only the duplicates, or
+  // only the records that share a guardian number (grouped together).
+  const [dupOnly, setDupOnly] = useState(false);
+  const [sharedParentOnly, setSharedParentOnly] = useState(false);
 
   const query = qs({
     search: debouncedSearch.trim(),
@@ -173,24 +178,49 @@ export default function StudentsPage() {
    * Egyptian name, so a short one leaves the row amber and chase-able instead of
    * blocking whoever was trying to enter the student.
    */
-  const incomplete = useMemo(() => {
-    const trackKindByGrade = new Map(grades.map((g) => [g.name, g.track_kind]));
-    return (s: Student) => {
-      const kind = s.grade ? trackKindByGrade.get(s.grade) : undefined;
-      const needsTrack = kind != null && TRACK_OPTIONS[kind].length > 0;
-      return (
-        !isFullName(s.name) ||
-        !s.grade?.trim() ||
-        !s.school?.trim() ||
-        !s.city?.trim() ||
-        !s.gender ||
-        !s.group_id ||
-        s.student_phones.length === 0 ||
-        s.parent_phones.length === 0 ||
-        (needsTrack && !s.academic_track)
-      );
+  const incomplete = useMemo(() => (s: Student) => isIncomplete(s, grades), [grades]);
+
+  // ── Duplicate detection, computed once over the whole loaded dataset. Two
+  // independent kinds, each with its own row colour:
+  //   • name/phone duplicate — the same name, or a student phone shared with
+  //     another student (a real collision to clean up after importing).
+  //   • parent-phone duplicate — siblings, or two records that ended up on the
+  //     same guardian number.
+  // A student's own repeated number does not count (deduped per student). ──
+  const dup = useMemo(() => {
+    const norm = (s: string) => s.replace(/\s+/g, " ").trim();
+    const digits = (p: string) => p.replace(/\D/g, "");
+    const nameCount = new Map<string, number>();
+    const studentPhoneCount = new Map<string, number>();
+    const parentPhoneCount = new Map<string, number>();
+    for (const s of allRows) {
+      const n = norm(s.name);
+      if (n) nameCount.set(n, (nameCount.get(n) ?? 0) + 1);
+      for (const d of new Set(s.student_phones.map(digits).filter(Boolean))) {
+        studentPhoneCount.set(d, (studentPhoneCount.get(d) ?? 0) + 1);
+      }
+      for (const d of new Set(s.parent_phones.map(digits).filter(Boolean))) {
+        parentPhoneCount.set(d, (parentPhoneCount.get(d) ?? 0) + 1);
+      }
+    }
+    const nameDup = (s: Student) => {
+      const n = norm(s.name);
+      return !!n && (nameCount.get(n) ?? 0) > 1;
     };
-  }, [grades]);
+    const studentPhoneDup = (s: Student) =>
+      s.student_phones.map(digits).filter(Boolean).some((d) => (studentPhoneCount.get(d) ?? 0) > 1);
+    const nameOrPhoneDup = (s: Student) => nameDup(s) || studentPhoneDup(s);
+    const parentPhoneDup = (s: Student) =>
+      s.parent_phones.map(digits).filter(Boolean).some((d) => (parentPhoneCount.get(d) ?? 0) > 1);
+    // Sort key that puts records sharing a parent number next to each other.
+    const parentGroupKey = (s: Student) => {
+      for (const d of s.parent_phones.map(digits).filter(Boolean)) {
+        if ((parentPhoneCount.get(d) ?? 0) > 1) return d;
+      }
+      return "~"; // students with no shared parent number sort last
+    };
+    return { nameOrPhoneDup, parentPhoneDup, parentGroupKey };
+  }, [allRows]);
 
   const colVal = useMemo(() => {
     const priceLabel = (s: Student) =>
@@ -247,22 +277,36 @@ export default function StudentsPage() {
     return allRows.filter(
       (s) =>
         matchesStudentSearch(s, term) &&
+        (!dupOnly || dup.nameOrPhoneDup(s)) &&
+        (!sharedParentOnly || dup.parentPhoneDup(s)) &&
         (Object.keys(colF) as ColKey[]).every((k) => {
           const set = colF[k];
           return !set || set.size === 0 || set.has(colVal[k](s));
         })
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [allRows, colF, colVal, debouncedSearch]);
+  }, [allRows, colF, colVal, debouncedSearch, dupOnly, sharedParentOnly, dup]);
   const anyColFilter = Object.values(colF).some((s) => s && s.size > 0);
+
+  // When filtering by shared guardian number, order the results so the records
+  // that share a number sit next to each other (then by name within a family).
+  const ordered = useMemo(() => {
+    if (!sharedParentOnly) return filtered;
+    return [...filtered].sort((a, b) => {
+      const ka = dup.parentGroupKey(a);
+      const kb = dup.parentGroupKey(b);
+      if (ka !== kb) return ka.localeCompare(kb);
+      return a.name.localeCompare(b.name, "ar");
+    });
+  }, [filtered, sharedParentOnly, dup]);
 
   // Filter first, paginate second: the page window always slices the FILTERED
   // rows, so 50 matches at 10 per page are 5 full pages.
   const perPage = Number(rows) || 10;
-  const totalCount = filtered.length;
+  const totalCount = ordered.length;
   const totalPages = Math.max(1, Math.ceil(totalCount / perPage));
   const current = Math.min(page, totalPages);
-  const visibleRows = filtered.slice((current - 1) * perPage, current * perPage);
+  const visibleRows = ordered.slice((current - 1) * perPage, current * perPage);
 
   // Reset to page 1 whenever the search, chip filters or page size change - but
   // NOT on mount, so a restored page survives navigation.
@@ -274,13 +318,15 @@ export default function StudentsPage() {
     }
     setPage(1);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [debouncedSearch, rows, colF, waMissingOnly]);
+  }, [debouncedSearch, rows, colF, waMissingOnly, dupOnly, sharedParentOnly]);
 
-  const hasFilters = !!search || anyColFilter || waMissingOnly;
+  const hasFilters = !!search || anyColFilter || waMissingOnly || dupOnly || sharedParentOnly;
   function clearFilters() {
     setSearch("");
     setColF({});
     setWaMissingOnly(false);
+    setDupOnly(false);
+    setSharedParentOnly(false);
   }
   function removeTag(k: ColKey, v: string) {
     setColF((prev) => {
@@ -478,6 +524,35 @@ export default function StudentsPage() {
             <MessageCircleOff className="h-4 w-4" />
             بدون واتساب
           </button>
+          {/* Duplicates: same name, or a student phone shared with another
+              record. Its pill wears the same purple as the rows it reveals. */}
+          <button
+            type="button"
+            onClick={() => setDupOnly((v) => !v)}
+            title="الطلاب الذين يتكرر اسمهم أو رقم هاتفهم مع طالب آخر"
+            className={`flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm font-medium transition ${
+              dupOnly
+                ? "border-purple-300 bg-purple-50 text-purple-700"
+                : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50"
+            }`}
+          >
+            <Copy className="h-4 w-4" />
+            التكرارات
+          </button>
+          {/* Records sharing a guardian number, grouped together in the table. */}
+          <button
+            type="button"
+            onClick={() => setSharedParentOnly((v) => !v)}
+            title="الطلاب الذين يشتركون في رقم ولي أمر واحد، مرتّبين معًا"
+            className={`flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm font-medium transition ${
+              sharedParentOnly
+                ? "border-sky-300 bg-sky-50 text-sky-700"
+                : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50"
+            }`}
+          >
+            <Users2 className="h-4 w-4" />
+            رقم ولي أمر مشترك
+          </button>
           {hasFilters && (
             <button
               onClick={clearFilters}
@@ -520,10 +595,18 @@ export default function StudentsPage() {
         </span>
         {/* What the coloured rows below mean. The swatches carry the same fill
             the rows use, so the key reads as a direct sample, not a guess. */}
-        <div className="flex items-center gap-4 text-xs text-slate-500">
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-slate-500">
           <span className="flex items-center gap-1.5">
             <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-amber-100 ring-1 ring-amber-400" />
             بيانات ناقصة
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-purple-100 ring-1 ring-purple-400" />
+            تكرار الاسم/الرقم
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-sky-100 ring-1 ring-sky-400" />
+            تكرار رقم ولي الأمر
           </span>
           <span className="flex items-center gap-1.5">
             <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-rose-100 ring-1 ring-rose-400" />
@@ -585,13 +668,34 @@ export default function StudentsPage() {
                   <th className="px-2 py-2.5">الحالة</th>
                   <th className="px-2 py-2.5">أنشئ في</th>
                   <th className="px-2 py-2.5">آخر تحديث</th>
-                  <th className="px-2 py-2.5 text-center">إجراءات</th>
+                  {/* Frozen to the edge so it stays reachable while the wide
+                      table scrolls sideways on a phone. */}
+                  <th className="sticky left-0 z-20 bg-dark px-2 py-2.5 text-center shadow-[1px_0_0_theme(colors.slate.700)]">
+                    إجراءات
+                  </th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {visibleRows.map((s) => {
                   const g = s.group_id ? groupById.get(s.group_id) : undefined;
                   const missing = incomplete(s);
+                  // Name/phone duplicate wins over a parent-number duplicate:
+                  // once the name/phone clash is fixed the row falls back to the
+                  // parent-number colour on the next load.
+                  const dupNamePhone = dup.nameOrPhoneDup(s);
+                  const dupParent = !dupNamePhone && dup.parentPhoneDup(s);
+                  // Priority: blocked (rose) → name/phone dup (purple) → shared
+                  // parent (sky) → incomplete (amber) → none. The frozen actions
+                  // cell repeats the row fill so it blends in while pinned.
+                  const tone = !s.is_active
+                    ? { row: "bg-rose-100 hover:bg-rose-200", cell: "bg-rose-100 group-hover:bg-rose-200" }
+                    : dupNamePhone
+                      ? { row: "bg-purple-100 hover:bg-purple-200", cell: "bg-purple-100 group-hover:bg-purple-200" }
+                      : dupParent
+                        ? { row: "bg-sky-100 hover:bg-sky-200", cell: "bg-sky-100 group-hover:bg-sky-200" }
+                        : missing
+                          ? { row: "bg-amber-100 hover:bg-amber-200", cell: "bg-amber-100 group-hover:bg-amber-200" }
+                          : { row: "hover:bg-slate-50/60", cell: "bg-white group-hover:bg-slate-50" };
                   // Each action is gated by its own permission, so a view-only
                   // assistant sees none of them - and then the menu button itself
                   // is hidden rather than opening on an empty list.
@@ -643,14 +747,7 @@ export default function StudentsPage() {
                       // The whole row opens the full detail view; the action
                       // buttons stop propagation so they still do their own thing.
                       onClick={() => setViewStudent(s)}
-                      // Blocked wins over incomplete: it is the harder stop.
-                      className={`h-14 cursor-pointer transition ${
-                        !s.is_active
-                          ? "bg-rose-100 hover:bg-rose-200"
-                          : missing
-                            ? "bg-amber-100 hover:bg-amber-200"
-                            : "hover:bg-slate-50/60"
-                      }`}
+                      className={`group h-14 cursor-pointer transition ${tone.row}`}
                     >
                       <td className="px-2 font-medium text-slate-400">{s.serial}</td>
                       <td className="px-2">
@@ -735,8 +832,13 @@ export default function StudentsPage() {
                       <td className="px-2"><AuditCell at={s.created_at} by={s.created_by} /></td>
                       <td className="px-2"><AuditCell at={s.updated_at} by={s.updated_by} /></td>
                       {/* One menu instead of a strip of icons: every action
-                          keeps its name and the column keeps its width. */}
-                      <td className="px-2" onClick={(e) => e.stopPropagation()}>
+                          keeps its name and the column keeps its width. Frozen to
+                          the edge so it stays reachable on a phone; the fill
+                          matches the row so scrolling content hides behind it. */}
+                      <td
+                        className={`sticky left-0 z-10 px-2 shadow-[1px_0_0_theme(colors.slate.200)] ${tone.cell}`}
+                        onClick={(e) => e.stopPropagation()}
+                      >
                         {rowActions.length > 0 && <RowActionsMenu actions={rowActions} />}
                       </td>
                     </tr>
@@ -782,6 +884,7 @@ export default function StudentsPage() {
         <StudentDetails
           student={viewStudent}
           groups={groups}
+          grades={grades}
           hasMobileApp={hasMobileApp}
           onClose={() => setViewStudent(null)}
         />

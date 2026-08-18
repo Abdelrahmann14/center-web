@@ -5,12 +5,16 @@ import {
   Plus,
   LogOut,
   CheckCircle2,
+  XCircle,
   Smartphone,
   MessageCircle,
   QrCode,
   Trash2,
   Link2,
   Clock,
+  RotateCcw,
+  ListChecks,
+  History,
 } from "@/components/icons";
 import { api, ApiError } from "@/lib/api";
 import { toast } from "@/components/ui/toast";
@@ -34,7 +38,35 @@ interface Responsibility {
   instance_id: string | null;
 }
 
+/** One message still waiting to leave the instance (Green API showMessagesQueue). */
+interface QueueItem {
+  chatId?: string;
+  typeMessage?: string;
+  textMessage?: string;
+  caption?: string;
+  body?: string;
+  message?: string;
+}
+
+/** A sent-message log row (mirror of the "الرسائل" history table). */
+interface LogRow {
+  id: string;
+  recipient_name: string | null;
+  phone: string | null;
+  body: string;
+  status: string;
+  created_at: string;
+}
+
 const SERVICE_TABS = [{ key: "whatsapp", label: "واتساب", icon: MessageCircle }] as const;
+
+const fmtWhen = (iso: string) =>
+  new Date(iso).toLocaleString("ar-EG", {
+    day: "2-digit",
+    month: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 
 export default function ServicesPage({ apiBase = "/super/services/whatsapp" }: { apiBase?: string }) {
   const [tab] = useState<(typeof SERVICE_TABS)[number]["key"]>("whatsapp");
@@ -109,7 +141,7 @@ export function WhatsappService({ apiBase }: { apiBase: string }) {
           <p className="mt-1 text-sm text-slate-400">أضف أول رقم واتساب لبدء إرسال الرسائل من المنصّة.</p>
         </div>
       ) : (
-        <div className="mt-5 grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <div className="mt-5 space-y-4">
           {numbers.map((n) => (
             <NumberCard
               key={n.id}
@@ -174,6 +206,7 @@ function NumberCard({
   // instance so it reflects whatever is actually in force.
   const [delay, setDelay] = useState<number | null>(null);
   const [delayInput, setDelayInput] = useState("");
+  const [delayReady, setDelayReady] = useState(false);
   const [savingDelay, setSavingDelay] = useState(false);
 
   useEffect(() => {
@@ -185,7 +218,10 @@ function NumberCard({
         setDelay(r.delay_seconds);
         setDelayInput(String(r.delay_seconds));
       })
-      .catch(() => alive && setDelay(0));
+      // The read can fail while Green API reboots the instance; leave the field
+      // editable (not stuck) so a value can still be typed and saved by hand.
+      .catch(() => {})
+      .finally(() => alive && setDelayReady(true));
     return () => {
       alive = false;
     };
@@ -211,19 +247,40 @@ function NumberCard({
       setSavingDelay(false);
     }
   }
+  const delaySeconds = Number(delayInput);
+  const delayValid = Number.isInteger(delaySeconds) && delaySeconds >= 1 && delaySeconds <= 600;
+  const delayDirty = delayInput !== "" && delaySeconds !== delay;
 
-  // Autosave the delay a beat after the last edit, once it is a valid, changed
-  // value - no Save button; the toast is the confirmation.
+  // Outgoing queue (Green API showMessagesQueue), loaded on mount, refreshable.
+  const [queue, setQueue] = useState<QueueItem[] | null>(null);
+  const [queueLoading, setQueueLoading] = useState(false);
+  const loadQueue = useCallback(async () => {
+    setQueueLoading(true);
+    try {
+      setQueue(await api.get<QueueItem[]>(`${apiBase}/${number.id}/queue`));
+    } catch {
+      setQueue([]);
+    } finally {
+      setQueueLoading(false);
+    }
+  }, [apiBase, number.id]);
   useEffect(() => {
-    if (delay === null) return;
-    const seconds = Number(delayInput);
-    if (!Number.isInteger(seconds) || seconds < 1 || seconds > 600 || seconds === delay) return;
-    const t = setTimeout(() => {
-      void saveDelay();
-    }, 900);
-    return () => clearTimeout(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [delayInput, delay]);
+    void loadQueue();
+  }, [loadQueue]);
+
+  // Recent messages the system actually sent (the shared "الرسائل" log). Failing
+  // to load it (e.g. no permission) just leaves the section empty.
+  const [sent, setSent] = useState<LogRow[] | null>(null);
+  useEffect(() => {
+    let alive = true;
+    api
+      .get<{ content: LogRow[] }>("/messaging/whatsapp/log?size=8&sort=createdAt,desc")
+      .then((r) => alive && setSent(r.content ?? []))
+      .catch(() => alive && setSent([]));
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   const title = number.label || (number.phone ? `+${number.phone}` : number.instance_id);
   const mine = resps.filter((r) => r.instance_id === number.id);
@@ -308,33 +365,129 @@ function NumberCard({
         )}
       </div>
 
-      {/* Send delay - the pause Green API leaves between outgoing messages,
-          configured here instead of from the Green API dashboard. */}
+      {/* Send delay + outgoing queue, side by side on wide screens. */}
+      <div className="mt-4 grid gap-4 border-t border-slate-100 pt-4 lg:grid-cols-2">
+        {/* Send delay - the pause Green API leaves between outgoing messages. */}
+        <div className="rounded-xl border border-slate-100 bg-slate-50/50 p-3">
+          <div className="flex items-center gap-1.5 text-sm font-semibold text-slate-700">
+            <Clock className="h-4 w-4 text-slate-400" />
+            التأخير بين الرسائل
+          </div>
+          <p className="mt-0.5 text-xs text-slate-400">
+            المدة التي ينتظرها Green API بين كل رسالة والتالية. يعيد تشغيل الرقم عند الحفظ وتسري خلال
+            دقائق.
+          </p>
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <input
+              type="number"
+              min={1}
+              max={600}
+              inputMode="numeric"
+              value={delayInput}
+              onChange={(e) => setDelayInput(e.target.value)}
+              disabled={!delayReady}
+              placeholder="—"
+              className="w-20 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20 disabled:opacity-60"
+            />
+            <span className="text-sm text-slate-500">ثانية</span>
+            <button
+              type="button"
+              onClick={saveDelay}
+              disabled={savingDelay || !delayReady || !delayValid || !delayDirty}
+              className="flex items-center gap-1.5 rounded-lg bg-accent px-3 py-1.5 text-sm font-medium text-white transition hover:bg-accent-hover disabled:opacity-50"
+            >
+              {savingDelay ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+              حفظ
+            </button>
+          </div>
+        </div>
+
+        {/* Outgoing queue (what is still waiting to be sent on Green API). */}
+        <div className="rounded-xl border border-slate-100 bg-slate-50/50 p-3">
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-1.5 text-sm font-semibold text-slate-700">
+              <ListChecks className="h-4 w-4 text-slate-400" />
+              طابور الإرسال
+              {queue && (
+                <span className="rounded-full bg-slate-200 px-2 py-0.5 text-[11px] font-semibold text-slate-600">
+                  {queue.length}
+                </span>
+              )}
+            </div>
+            <button
+              type="button"
+              onClick={loadQueue}
+              disabled={queueLoading}
+              title="تحديث"
+              className="rounded-lg p-1 text-slate-400 transition hover:bg-slate-100 hover:text-slate-600 disabled:opacity-60"
+            >
+              <RotateCcw className={`h-4 w-4 ${queueLoading ? "animate-spin" : ""}`} />
+            </button>
+          </div>
+          <p className="mt-0.5 text-xs text-slate-400">
+            الرسائل التي ما زالت تنتظر الإرسال من هذا الرقم على Green API.
+          </p>
+          <div className="mt-2 max-h-40 space-y-1.5 overflow-y-auto">
+            {queue === null ? (
+              <p className="text-xs text-slate-400">جارٍ التحميل…</p>
+            ) : queue.length === 0 ? (
+              <p className="text-xs text-slate-400">لا توجد رسائل في الطابور.</p>
+            ) : (
+              queue.map((q, i) => {
+                const text =
+                  q.textMessage || q.caption || q.body || q.message || q.typeMessage || "—";
+                const chat = (q.chatId || "").replace(/@c\.us$/, "");
+                return (
+                  <div key={i} className="rounded-lg bg-white px-2.5 py-1.5 text-xs">
+                    <span className="tabular-nums text-slate-500" dir="ltr">
+                      {chat}
+                    </span>
+                    <span className="mt-0.5 block truncate text-slate-700" title={text}>
+                      {text}
+                    </span>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Recent messages the system actually sent out. */}
       <div className="mt-4 border-t border-slate-100 pt-4">
         <div className="flex items-center gap-1.5 text-sm font-semibold text-slate-700">
-          <Clock className="h-4 w-4 text-slate-400" />
-          التأخير بين الرسائل
+          <History className="h-4 w-4 text-slate-400" />
+          آخر الرسائل الصادرة من النظام
         </div>
-        <p className="mt-0.5 text-xs text-slate-400">
-          المدة التي ينتظرها Green API بين كل رسالة والتالية. يعيد تشغيل الرقم عند الحفظ وتسري خلال دقائق.
-        </p>
-        <div className="mt-2 flex items-center gap-2">
-          <input
-            type="number"
-            min={1}
-            max={600}
-            inputMode="numeric"
-            value={delayInput}
-            onChange={(e) => setDelayInput(e.target.value)}
-            disabled={delay === null}
-            className="w-24 rounded-lg border border-slate-300 px-3 py-1.5 text-sm outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20 disabled:opacity-60"
-          />
-          <span className="text-sm text-slate-500">ثانية</span>
-          {savingDelay && (
-            <span className="flex items-center gap-1.5 text-xs font-medium text-slate-400">
-              <Loader2 className="h-4 w-4 animate-spin" />
-              جارٍ الحفظ…
-            </span>
+        <div className="mt-2 space-y-1.5">
+          {sent === null ? (
+            <p className="text-xs text-slate-400">جارٍ التحميل…</p>
+          ) : sent.length === 0 ? (
+            <p className="text-xs text-slate-400">لا توجد رسائل صادرة بعد.</p>
+          ) : (
+            sent.map((m) => (
+              <div
+                key={m.id}
+                className="flex items-start gap-2 rounded-lg border border-slate-100 bg-slate-50/50 px-3 py-2"
+              >
+                {m.status === "SENT" ? (
+                  <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-green-600" />
+                ) : (
+                  <XCircle className="mt-0.5 h-4 w-4 shrink-0 text-rose-500" />
+                )}
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="truncate text-sm font-medium text-slate-700" dir="auto">
+                      {m.recipient_name || m.phone || "—"}
+                    </span>
+                    <span className="shrink-0 text-[11px] text-slate-400">{fmtWhen(m.created_at)}</span>
+                  </div>
+                  <p className="mt-0.5 truncate text-xs text-slate-500" dir="auto" title={m.body}>
+                    {m.body}
+                  </p>
+                </div>
+              </div>
+            ))
           )}
         </div>
       </div>

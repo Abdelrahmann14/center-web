@@ -7,7 +7,7 @@ import { useDebounced } from "@/lib/useDebounced";
 import { useOnline } from "@/lib/useOnline";
 import { useSync } from "@/sync/SyncProvider";
 import { useWhatsappCheck, type WaStatus } from "@/lib/useWhatsappCheck";
-import { NAME_MIN_PARTS, nameParts } from "@/lib/studentName";
+import { NAME_MIN_PARTS, nameParts, isFullName } from "@/lib/studentName";
 import { TRACK_OPTIONS, RELIGIONS, GENDERS, type TrackKind } from "@/lib/tracks";
 import { Modal, Field, Select, FieldError, FormNotice, AutocompleteInput, advanceOnEnter, inputClass } from "@/components/ui";
 import { useToast } from "@/components/Toast";
@@ -102,6 +102,7 @@ function PhoneList({
   setPhones,
   errors,
   statuses,
+  incomplete = false,
   onFocus,
   onBlur,
 }: {
@@ -110,6 +111,8 @@ function PhoneList({
   setPhones: (p: string[]) => void;
   errors: (string | null)[];
   statuses?: (WaStatus | undefined)[];
+  /** Amber-marks empty numbers as a still-missing required field. */
+  incomplete?: boolean;
   onFocus?: () => void;
   /** Reports that the user has left this number, so its error may show. */
   onBlur?: (index: number) => void;
@@ -128,6 +131,7 @@ function PhoneList({
               <Field
                 label={i === 0 ? label : `${label} ${(i + 1).toLocaleString("ar-EG")}`}
                 filled={p !== ""}
+                incomplete={incomplete && !digitsOnly(p)}
                 className="flex-1"
               >
                 <FieldError message={errors[i]} />
@@ -364,6 +368,28 @@ export function StudentForm({
     const d = digitsOnly(p);
     return d.length >= MIN_DIGITS && !!phoneOwnerOf(d);
   });
+  // The other student(s) already holding a number typed here, named so the
+  // confirm checkbox says exactly whose number this is.
+  const dupOwnerNames = Array.from(
+    new Set(
+      studentPhones
+        .map((p) => phoneOwnerOf(digitsOnly(p)))
+        .filter((n): n is string => !!n),
+    ),
+  );
+
+  // Which required fields are still missing, shown as an amber halo on each one
+  // while EDITING an existing record (a blank add form would otherwise light up
+  // entirely). Mirrors the students-page "بيانات ناقصة" rule field-by-field.
+  const mark = (missing: boolean) => isEdit && missing;
+  const nameIncomplete = mark(!!name.trim() && !isFullName(name));
+  const schoolIncomplete = mark(!school.trim());
+  const cityIncomplete = mark(!city.trim());
+  const gradeIncomplete = mark(!grade);
+  const trackIncomplete = mark(trackOptions.length > 0 && !track);
+  const groupIncomplete = mark(!groupId);
+  const sPhonesIncomplete = mark(spAllEmpty);
+  const pPhonesIncomplete = mark(ppAllEmpty);
 
   function reset() {
     setName("");
@@ -579,7 +605,7 @@ export function StudentForm({
               input sanitises anything else away), and a short name is reported
               where it matters - the students page flags the record as
               "بيانات ناقصة" - rather than nagging while it is being typed. */}
-          <Field label="الاسم بالكامل" filled={!!name}>
+          <Field label="الاسم بالكامل" filled={!!name} incomplete={nameIncomplete}>
             <FieldError message={nameError} />
             <input
               type="text"
@@ -593,7 +619,7 @@ export function StudentForm({
           </Field>
         </div>
 
-        <Field label="المدرسة" filled={!!school}>
+        <Field label="المدرسة" filled={!!school} incomplete={schoolIncomplete}>
           <FieldError message={req(O.school, school)} />
           <AutocompleteInput
             value={school}
@@ -603,7 +629,7 @@ export function StudentForm({
           />
         </Field>
 
-        <Field label="المنطقة السكنية" filled={!!city}>
+        <Field label="المنطقة السكنية" filled={!!city} incomplete={cityIncomplete}>
           <FieldError message={req(O.city, city)} />
           <AutocompleteInput
             value={city}
@@ -616,6 +642,7 @@ export function StudentForm({
         <Field
           label="الصف"
           filled={!!grade}
+          incomplete={gradeIncomplete}
           hint={activeGrades.length === 0 ? "لا توجد صفوف - أضفها من لوحة المدرّس" : undefined}
         >
           <FieldError message={req(O.grade, grade)} />
@@ -629,7 +656,7 @@ export function StudentForm({
         </Field>
 
         {trackOptions.length > 0 && (
-          <Field label="الشعبة" filled={!!track}>
+          <Field label="الشعبة" filled={!!track} incomplete={trackIncomplete}>
             <FieldError message={req(O.track, track)} />
             <Select
               value={track}
@@ -643,6 +670,7 @@ export function StudentForm({
         <Field
           label="المجموعة"
           filled={!!groupId}
+          incomplete={groupIncomplete}
           hint={groupOptions.length === 0 ? "لا توجد مجموعات لهذا الصف" : undefined}
         >
           <FieldError message={req(O.group, groupId)} />
@@ -726,17 +754,22 @@ export function StudentForm({
             setPhones={setStudentPhones}
             errors={studentPhoneErrors}
             statuses={studentWaStatuses}
+            incomplete={sPhonesIncomplete}
             onBlur={(i) => touch(`sphone${i}`)}
           />
           {hasDupOwner && (
-            <label className="mt-2 flex cursor-pointer items-center gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+            <label className="mt-2 flex cursor-pointer items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
               <input
                 type="checkbox"
                 checked={allowDup}
                 onChange={(e) => setAllowDup(e.target.checked)}
-                className="h-4 w-4 accent-accent"
+                className="mt-0.5 h-4 w-4 accent-accent"
               />
-              حفظ الطالب رغم أن الرقم مسجّل لطالب آخر
+              <span>
+                هذا الرقم مسجّل بالفعل للطالب:{" "}
+                <span className="font-semibold">{dupOwnerNames.join("، ")}</span>. حفظ الطالب رغم
+                ذلك.
+              </span>
             </label>
           )}
         </div>
@@ -747,6 +780,7 @@ export function StudentForm({
             setPhones={setParentPhones}
             errors={parentPhoneErrors}
             statuses={parentWaStatuses}
+            incomplete={pPhonesIncomplete}
             onBlur={(i) => touch(`pphone${i}`)}
           />
         </div>

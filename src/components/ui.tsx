@@ -50,6 +50,7 @@ export function Field({
   hint,
   filled,
   multiline,
+  incomplete = false,
   plain = false,
   className = "",
   children,
@@ -60,6 +61,12 @@ export function Field({
   filled?: boolean;
   /** Overrides textarea auto-detection (rests the label near the top). */
   multiline?: boolean;
+  /**
+   * Marks this field as a still-missing part of the record: an amber halo round
+   * the control and an amber label, so "what exactly is ناقص" is visible at a
+   * glance without waiting for a submit. Clears the moment the value is filled.
+   */
+  incomplete?: boolean;
   /** Renders the old label-above-control layout. */
   plain?: boolean;
   className?: string;
@@ -117,7 +124,9 @@ export function Field({
       <div className={className}>
         <div
           ref={ref}
-          className="relative"
+          className={`relative rounded-xl ${
+            incomplete && !focused ? "ring-1 ring-amber-300" : ""
+          }`}
           onFocus={() => setFocused(true)}
           onBlur={() => setFocused(false)}
           onInput={scan}
@@ -135,7 +144,15 @@ export function Field({
                 : asTextarea
                   ? "top-3 text-sm"
                   : "top-1/2 -translate-y-1/2 text-sm"
-            } ${focused ? "text-accent" : up ? "text-slate-600" : "text-slate-400"}`}
+            } ${
+              focused
+                ? "text-accent"
+                : incomplete
+                  ? "text-amber-600"
+                  : up
+                    ? "text-slate-600"
+                    : "text-slate-400"
+            }`}
           >
             {label}
           </label>

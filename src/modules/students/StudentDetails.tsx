@@ -1,8 +1,9 @@
 import { type ReactNode } from "react";
-import { Ban, Coins } from "@/components/icons";
+import { AlertTriangle, Ban, Coins } from "@/components/icons";
 import { Modal } from "@/components/ui";
 import { AuditCell } from "@/components/AuditCell";
-import { groupLabel, type Student, type Group } from "./StudentForm";
+import { groupLabel, type Student, type Group, type Grade } from "./StudentForm";
+import { missingStudentFields, STUDENT_FIELD_LABEL } from "./incompleteFields";
 
 /**
  * Read-only view of every field a student carries - including the ones the table
@@ -12,16 +13,21 @@ import { groupLabel, type Student, type Group } from "./StudentForm";
 export function StudentDetails({
   student,
   groups,
+  grades,
   hasMobileApp,
   onClose,
 }: {
   student: Student;
   groups: Group[];
+  grades: Grade[];
   /** The app column only means something for a workspace with the mobile app. */
   hasMobileApp: boolean;
   onClose: () => void;
 }) {
   const group = student.group_id ? groups.find((g) => g.id === student.group_id) : undefined;
+  // Exactly which required fields are still missing, so each one is marked amber
+  // (and named up top) rather than only tinting the whole row on the table.
+  const missing = missingStudentFields(student, grades);
 
   return (
     <Modal
@@ -40,13 +46,29 @@ export function StudentDetails({
       }
     >
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-        <Info label="الصف" value={student.grade} />
-        <Info label="المجموعة" value={group ? groupLabel(group) : null} className="col-span-2 sm:col-span-2" />
-        <Info label="المدرسة" value={student.school} />
-        <Info label="المنطقة السكنية" value={student.city} />
-        <Info label="النوع" value={student.gender} />
+        {missing.size > 0 && (
+          <div className="col-span-2 flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 sm:col-span-3">
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+            <span>
+              <span className="font-semibold">بيانات ناقصة: </span>
+              {Array.from(missing)
+                .map((f) => STUDENT_FIELD_LABEL[f])
+                .join("، ")}
+            </span>
+          </div>
+        )}
+        <Info label="الصف" value={student.grade} missing={missing.has("grade")} />
+        <Info
+          label="المجموعة"
+          value={group ? groupLabel(group) : null}
+          missing={missing.has("group")}
+          className="col-span-2 sm:col-span-2"
+        />
+        <Info label="المدرسة" value={student.school} missing={missing.has("school")} />
+        <Info label="المنطقة السكنية" value={student.city} missing={missing.has("city")} />
+        <Info label="النوع" value={student.gender} missing={missing.has("gender")} />
         <Info label="الديانة" value={student.religion} />
-        <Info label="الشعبة" value={student.academic_track} />
+        <Info label="الشعبة" value={student.academic_track} missing={missing.has("academic_track")} />
 
         <Info label="سعر الحصة" value={<PriceValue student={student} />} />
         {student.is_discounted && (
@@ -57,8 +79,16 @@ export function StudentDetails({
           />
         )}
 
-        <Phones label="هاتف الطالب" phones={student.student_phones} />
-        <Phones label="هاتف ولي الأمر" phones={student.parent_phones} />
+        <Phones
+          label="هاتف الطالب"
+          phones={student.student_phones}
+          missing={missing.has("student_phones")}
+        />
+        <Phones
+          label="هاتف ولي الأمر"
+          phones={student.parent_phones}
+          missing={missing.has("parent_phones")}
+        />
 
         <Info
           label="الحالة"
@@ -110,35 +140,56 @@ export function StudentDetails({
   );
 }
 
-function FieldLabel({ children }: { children: ReactNode }) {
-  return <div className="mb-1.5 text-sm font-semibold text-slate-700">{children}</div>;
+function FieldLabel({ children, missing = false }: { children: ReactNode; missing?: boolean }) {
+  return (
+    <div className={`mb-1.5 text-sm font-semibold ${missing ? "text-amber-700" : "text-slate-700"}`}>
+      {children}
+    </div>
+  );
 }
+
+// The control box: amber border + fill when the field is a still-missing part of
+// the record, the neutral slate otherwise.
+const boxClass = (missing: boolean) =>
+  `min-h-[42px] rounded-xl border px-4 py-2.5 text-slate-800 ${
+    missing ? "border-amber-300 bg-amber-50" : "border-slate-200 bg-slate-50"
+  }`;
 
 function Info({
   label,
   value,
+  missing = false,
   className = "",
 }: {
   label: string;
   value: ReactNode;
+  missing?: boolean;
   className?: string;
 }) {
   const empty = value == null || value === "";
   return (
     <div className={className}>
-      <FieldLabel>{label}</FieldLabel>
-      <div className="min-h-[42px] rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-slate-800">
+      <FieldLabel missing={missing}>{label}</FieldLabel>
+      <div className={boxClass(missing)}>
         <span className={empty ? "text-slate-400" : ""}>{empty ? "-" : value}</span>
       </div>
     </div>
   );
 }
 
-function Phones({ label, phones }: { label: string; phones: string[] }) {
+function Phones({
+  label,
+  phones,
+  missing = false,
+}: {
+  label: string;
+  phones: string[];
+  missing?: boolean;
+}) {
   return (
     <div>
-      <FieldLabel>{label}</FieldLabel>
-      <div className="min-h-[42px] rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-slate-800" dir="ltr">
+      <FieldLabel missing={missing}>{label}</FieldLabel>
+      <div className={boxClass(missing)} dir="ltr">
         {phones.length ? (
           <div className="space-y-0.5 text-right tabular-nums">
             {phones.map((p) => (
