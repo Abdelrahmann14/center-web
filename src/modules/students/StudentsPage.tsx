@@ -5,7 +5,6 @@ import {
   X,
   Ban,
   Barcode,
-  Camera,
   FileChartColumn,
   Loader2,
   Pencil,
@@ -29,7 +28,6 @@ import { usePageState } from "@/lib/pageState";
 import { TRACK_OPTIONS } from "@/lib/tracks";
 import { useAuth } from "@/auth/AuthContext";
 import { useBarcodeScanner } from "@/lib/useBarcodeScanner";
-import { CameraScanner, cameraScanSupported } from "@/components/CameraScanner";
 import {
   STUDENT_SEARCH_PLACEHOLDER,
   matchesStudentSearch,
@@ -88,12 +86,6 @@ export default function StudentsPage() {
   const [confirmDelete, setConfirmDelete] = useState<Student | null>(null);
   /** Id of the student whose barcode is being sent, so only that row spins. */
   const [sendingBarcode, setSendingBarcode] = useState<string | null>(null);
-  const [scanning, setScanning] = useState(false);
-  // The camera path only exists where the browser can actually decode a frame;
-  // offering a button that opens a camera and never finds anything is worse than
-  // not offering it. The desk scanner below needs no such check - it is a
-  // keyboard, and every browser has one of those.
-  const [canScanWithCamera] = useState(cameraScanSupported);
 
   /**
    * A scanned code IS a student code, so it goes straight into the search box -
@@ -401,17 +393,7 @@ export default function StudentsPage() {
               </span>
             )}
           </div>
-          {canScanWithCamera && (
-            <button
-              onClick={() => setScanning(true)}
-              title="مسح باركود الطالب بالكاميرا"
-              aria-label="مسح باركود بالكاميرا"
-              className="order-2 flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-slate-300 bg-white text-slate-500 shadow-sm transition hover:bg-slate-50"
-            >
-              <Camera className="h-5 w-5" />
-            </button>
-          )}
-          <div className="relative order-3" ref={settingsRef}>
+          <div className="relative order-2" ref={settingsRef}>
             <button
               onClick={() => setSettingsOpen((o) => !o)}
               aria-haspopup="menu"
@@ -794,10 +776,6 @@ export default function StudentsPage() {
           hasMobileApp={hasMobileApp}
           onClose={() => setViewStudent(null)}
         />
-      )}
-
-      {scanning && (
-        <CameraScanner onScan={onScanned} onClose={() => setScanning(false)} />
       )}
 
       {confirmDelete && (
