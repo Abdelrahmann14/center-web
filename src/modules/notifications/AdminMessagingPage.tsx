@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Send, Loader2, Search, X, MessageCircle, History, Check, Users, Clock, CheckCircle2, Ban, RotateCcw,
-  ChevronDown, UserPlus, ClipboardCheck,
+  ChevronDown, UserPlus, ClipboardCheck, FileChartColumn,
 } from "@/components/icons";
 import { api, ApiError } from "@/lib/api";
 import { cachedGetAll } from "@/lib/dataCache";
@@ -25,7 +25,7 @@ import { VariableTextArea } from "./VariableTextArea";
 // ── Shared types ───────────────────────────────────────────────────────────
 
 type Audience = "STUDENT" | "PARENT" | "BOTH";
-type AutomationKind = "ATTENDANCE" | "ABSENCE" | "NEW_STUDENT" | "EXAM_GRADE";
+type AutomationKind = "ATTENDANCE" | "ABSENCE" | "NEW_STUDENT" | "EXAM_GRADE" | "REPORT";
 
 interface Automation {
   type: AutomationKind;
@@ -413,7 +413,14 @@ type CardTheme = { iconBg: string; iconText: string; hover: string; lift: string
 // cards read apart at a glance. The raised 3D lip takes the type's own accent.
 const AUTOMATION_META: Record<
   AutomationKind,
-  { title: string; description: string; Icon: React.ComponentType<{ className?: string }>; t: CardTheme }
+  {
+    title: string;
+    description: string;
+    Icon: React.ComponentType<{ className?: string }>;
+    t: CardTheme;
+    /** When true the card has no recipient control - the sender chooses per send. */
+    hideAudience?: boolean;
+  }
 > = {
   ATTENDANCE: {
     title: "رسالة الحضور",
@@ -437,7 +444,7 @@ const AUTOMATION_META: Record<
   },
   NEW_STUDENT: {
     title: "رسالة طالب جديد",
-    description: "تُرسَل تلقائيًا فور إضافة طالب جديد، ومعها بطاقة الباركود (PDF).",
+    description: "تُرسَل تلقائيًا فور إضافة طالب جديد، ومعها بطاقة الباركود (PDF). ونفسها تُرسَل من زر الباركود للطالب.",
     Icon: UserPlus,
     t: {
       iconBg: "bg-emerald-100", iconText: "text-emerald-600",
@@ -447,12 +454,23 @@ const AUTOMATION_META: Record<
   },
   EXAM_GRADE: {
     title: "رسالة درجة الاختبار",
-    description: "تُرسَل تلقائيًا فور إدخال درجة اختبار الطالب في حصة وحفظها.",
+    description: "تُرسَل من زر «إرسال درجات الاختبار» داخل المجموعة في صفحة الحصص.",
     Icon: ClipboardCheck,
     t: {
       iconBg: "bg-violet-100", iconText: "text-violet-600",
       hover: "hover:border-violet-200",
       lift: "shadow-[0_5px_0_0_#7c3aed,0_12px_20px_-5px_rgb(15_23_42_/_0.22)] hover:shadow-[0_8px_0_0_#7c3aed,0_22px_30px_-6px_rgb(15_23_42_/_0.30)]",
+    },
+  },
+  REPORT: {
+    title: "رسالة التقرير",
+    description: "النص الذي يُرسَل مع تقرير الطالب (PDF) عند الضغط على «إرسال التقرير». المستلم يُختار وقت الإرسال.",
+    Icon: FileChartColumn,
+    hideAudience: true,
+    t: {
+      iconBg: "bg-sky-100", iconText: "text-sky-600",
+      hover: "hover:border-sky-200",
+      lift: "shadow-[0_5px_0_0_#0284c7,0_12px_20px_-5px_rgb(15_23_42_/_0.22)] hover:shadow-[0_8px_0_0_#0284c7,0_22px_30px_-6px_rgb(15_23_42_/_0.30)]",
     },
   },
 };
@@ -486,7 +504,7 @@ function ImageSwitch({ checked, onChange }: { checked: boolean; onChange: (v: bo
 }
 
 function AutomationCard({ automation }: { automation: Automation }) {
-  const { title, description, Icon, t } = AUTOMATION_META[automation.type];
+  const { title, description, Icon, t, hideAudience } = AUTOMATION_META[automation.type];
   const [open, setOpen] = useState(false);
   const [base, setBase] = useState(automation.base);
   const [baseSendAsImage, setBaseSendAsImage] = useState(automation.base_send_as_image);
@@ -588,17 +606,21 @@ function AutomationCard({ automation }: { automation: Automation }) {
             {/* One settings line: who gets it, and the button that writes variants. */}
             <Reveal open={open} delay={40}>
               <div className="flex flex-wrap items-center gap-2">
-                <span className="text-xs font-medium text-slate-500">يستلمها</span>
-                <RecipientCheck
-                  label="ولي الأمر"
-                  checked={toParent}
-                  onChange={(v) => (v || toStudent) && setToParent(v)}
-                />
-                <RecipientCheck
-                  label="الطالب"
-                  checked={toStudent}
-                  onChange={(v) => (v || toParent) && setToStudent(v)}
-                />
+                {!hideAudience && (
+                  <>
+                    <span className="text-xs font-medium text-slate-500">يستلمها</span>
+                    <RecipientCheck
+                      label="ولي الأمر"
+                      checked={toParent}
+                      onChange={(v) => (v || toStudent) && setToParent(v)}
+                    />
+                    <RecipientCheck
+                      label="الطالب"
+                      checked={toStudent}
+                      onChange={(v) => (v || toParent) && setToStudent(v)}
+                    />
+                  </>
+                )}
                 <button
                   onClick={generate}
                   disabled={generating}
