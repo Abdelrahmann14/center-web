@@ -28,5 +28,5 @@ export default function AdminWhatsappPage() {
     );
   }
 
-  return <WhatsappService apiBase="/services/whatsapp" />;
+  return <WhatsappService apiBase="/services/whatsapp" managed />;
 }

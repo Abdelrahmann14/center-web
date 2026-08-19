@@ -4,6 +4,7 @@ import { useAuth } from "@/auth/AuthContext";
 import { api, ApiError } from "@/lib/api";
 import { GOOGLE_CONNECTED } from "@/lib/appEvents";
 import { toast, ToastViewport } from "@/components/ui/toast";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { LoaderBlock } from "@/components/PencilLoader";
 import LoginPage from "@/pages/LoginPage";
 import DashboardLayout from "@/pages/DashboardLayout";
@@ -131,7 +132,10 @@ export default function App() {
     <>
       {viewport}
       {/* One boundary around the whole route tree: a lazily loaded screen shows
-          the same loader the app already uses while its chunk arrives. */}
+          the same loader the app already uses while its chunk arrives. The error
+          boundary sits outside it so a failed chunk (or any render error) shows a
+          recover screen instead of blanking the app to white. */}
+      <ErrorBoundary>
       <Suspense fallback={<LoaderBlock />}>
       <Routes>
       <Route path="/login" element={user ? <Navigate to="/" replace /> : <LoginPage />} />
@@ -216,6 +220,7 @@ export default function App() {
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
     </Suspense>
+    </ErrorBoundary>
     </>
   );
 }

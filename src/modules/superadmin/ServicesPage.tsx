@@ -3,6 +3,7 @@ import {
   Loader2,
   Save,
   Plus,
+  Pencil,
   LogOut,
   CheckCircle2,
   XCircle,
@@ -92,7 +93,12 @@ export default function ServicesPage({ apiBase = "/super/services/whatsapp" }: {
   );
 }
 
-export function WhatsappService({ apiBase }: { apiBase: string }) {
+/**
+ * @param managed  the ADMIN's own view: the super admin provisions the numbers,
+ *                 so there is no add/remove here and the Green API instance id is
+ *                 hidden - the admin only names a number and scans its QR.
+ */
+export function WhatsappService({ apiBase, managed = false }: { apiBase: string; managed?: boolean }) {
   const [numbers, setNumbers] = useState<WaNumber[] | null>(null);
   const [resps, setResps] = useState<Responsibility[]>([]);
   const [adding, setAdding] = useState(false);
@@ -125,20 +131,27 @@ export function WhatsappService({ apiBase }: { apiBase: string }) {
           </span>
           <h2 className="text-lg font-bold text-slate-800">أرقام واتساب</h2>
         </div>
-        <button
-          onClick={() => setAdding(true)}
-          className="flex shrink-0 items-center gap-2 rounded-xl bg-accent px-4 py-2.5 font-medium text-white transition hover:bg-accent-hover"
-        >
-          <Plus className="h-5 w-5" />
-          إضافة رقم
-        </button>
+        {/* The admin cannot add numbers - the super admin provisions them. */}
+        {!managed && (
+          <button
+            onClick={() => setAdding(true)}
+            className="flex shrink-0 items-center gap-2 rounded-xl bg-accent px-4 py-2.5 font-medium text-white transition hover:bg-accent-hover"
+          >
+            <Plus className="h-5 w-5" />
+            إضافة رقم
+          </button>
+        )}
       </div>
 
       {numbers.length === 0 ? (
         <div className="mt-5 rounded-2xl border border-dashed border-slate-300 bg-white px-6 py-14 text-center">
           <Smartphone className="mx-auto mb-3 h-12 w-12 text-slate-300" />
           <p className="font-semibold text-slate-600">لا توجد أرقام مرتبطة بعد</p>
-          <p className="mt-1 text-sm text-slate-400">أضف أول رقم واتساب لبدء إرسال الرسائل من المنصّة.</p>
+          <p className="mt-1 text-sm text-slate-400">
+            {managed
+              ? "لم تُضِف الإدارة أي رقم لحسابك بعد. تواصل معها لإضافة رقم واتساب."
+              : "أضف أول رقم واتساب لبدء إرسال الرسائل من المنصّة."}
+          </p>
         </div>
       ) : (
         <div className="mt-5 space-y-4">
@@ -149,6 +162,7 @@ export function WhatsappService({ apiBase }: { apiBase: string }) {
               number={n}
               numbers={numbers}
               resps={resps}
+              managed={managed}
               onLink={() => setLinkId(n.id)}
               onChanged={load}
             />
@@ -172,6 +186,7 @@ export function WhatsappService({ apiBase }: { apiBase: string }) {
         <QrModal
           apiBase={apiBase}
           number={linkingNumber}
+          managed={managed}
           onClose={() => setLinkId(null)}
           onConnected={async () => {
             await load();
@@ -189,6 +204,7 @@ function NumberCard({
   number,
   numbers,
   resps,
+  managed = false,
   onLink,
   onChanged,
 }: {
@@ -196,11 +212,13 @@ function NumberCard({
   number: WaNumber;
   numbers: WaNumber[];
   resps: Responsibility[];
+  managed?: boolean;
   onLink: () => void;
   onChanged: () => Promise<unknown>;
 }) {
   const [busy, setBusy] = useState(false);
   const [confirmRemove, setConfirmRemove] = useState(false);
+  const [renaming, setRenaming] = useState(false);
 
   // Send delay (Green API account setting, per number). Loaded lazily from the
   // instance so it reflects whatever is actually in force.
@@ -282,7 +300,9 @@ function NumberCard({
     };
   }, []);
 
-  const title = number.label || (number.phone ? `+${number.phone}` : number.instance_id);
+  // Never the phone: it already shows next to the "فصل" button when connected,
+  // so putting it here too just printed the same number twice.
+  const title = number.label || "رقم واتساب";
   const mine = resps.filter((r) => r.instance_id === number.id);
   const otherConnected = numbers.filter((n) => n.id !== number.id && n.connected).length;
 
@@ -313,6 +333,13 @@ function NumberCard({
     }
   }
 
+  async function rename(label: string) {
+    await api.put(`${apiBase}/${number.id}/label`, { label: label.trim() || null });
+    await onChanged();
+    setRenaming(false);
+    toast.success("تم حفظ الاسم");
+  }
+
   return (
     <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
       <div className="flex items-start justify-between gap-3">
@@ -320,19 +347,38 @@ function NumberCard({
           <div className={`flex h-11 w-11 items-center justify-center rounded-xl ${number.connected ? "bg-green-50" : "bg-slate-100"}`}>
             <WhatsappLogo className="h-6 w-6" />
           </div>
-          <div>
-            <p className="font-bold text-slate-800" dir="auto">{title}</p>
-            <p className="text-xs text-slate-400" dir="ltr">Instance {number.instance_id}</p>
+          <div className="min-w-0">
+            <div className="flex items-center gap-1.5">
+              <p className="truncate font-bold text-slate-800" dir="auto">{title}</p>
+              {/* Naming a number is how you tell several apart, so it is always
+                  available - the admin renames, the super admin adjusts. */}
+              <button
+                onClick={() => setRenaming(true)}
+                title="إعادة تسمية"
+                className="shrink-0 rounded-md p-1 text-slate-400 transition hover:bg-slate-100 hover:text-slate-600"
+              >
+                <Pencil className="h-3.5 w-3.5" />
+              </button>
+            </div>
+            {/* The Green API instance id is an implementation detail the admin
+                does not need (and should not manage), so it is hidden there. */}
+            {!managed && (
+              <p className="text-xs text-slate-400" dir="ltr">Instance {number.instance_id}</p>
+            )}
           </div>
         </div>
-        <button
-          onClick={() => setConfirmRemove(true)}
-          disabled={busy}
-          className="flex shrink-0 items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium text-rose-600 transition hover:bg-rose-50 disabled:opacity-60"
-        >
-          <Trash2 className="h-4 w-4" />
-          إزالة
-        </button>
+        {/* Removing a number is provisioning - the super admin's job, not the
+            admin's (who only links and renames). */}
+        {!managed && (
+          <button
+            onClick={() => setConfirmRemove(true)}
+            disabled={busy}
+            className="flex shrink-0 items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium text-rose-600 transition hover:bg-rose-50 disabled:opacity-60"
+          >
+            <Trash2 className="h-4 w-4" />
+            إزالة
+          </button>
+        )}
       </div>
 
       {/* Connection actions - separated from the header by a light divider. */}
@@ -425,29 +471,17 @@ function NumberCard({
             </button>
           </div>
           <p className="mt-0.5 text-xs text-slate-400">
-            الرسائل التي ما زالت تنتظر الإرسال من هذا الرقم على Green API.
+            عدد الرسائل التي ما زالت تنتظر الإرسال من هذا الرقم على Green API. نص كل
+            رسالة موجود في سجل «الرسائل».
           </p>
-          <div className="mt-2 max-h-40 space-y-1.5 overflow-y-auto">
+          <div className="mt-2">
             {queue === null ? (
               <p className="text-xs text-slate-400">جارٍ التحميل…</p>
-            ) : queue.length === 0 ? (
-              <p className="text-xs text-slate-400">لا توجد رسائل في الطابور.</p>
             ) : (
-              queue.map((q, i) => {
-                const text =
-                  q.textMessage || q.caption || q.body || q.message || q.typeMessage || "—";
-                const chat = (q.chatId || "").replace(/@c\.us$/, "");
-                return (
-                  <div key={i} className="rounded-lg bg-white px-2.5 py-1.5 text-xs">
-                    <span className="tabular-nums text-slate-500" dir="ltr">
-                      {chat}
-                    </span>
-                    <span className="mt-0.5 block truncate text-slate-700" title={text}>
-                      {text}
-                    </span>
-                  </div>
-                );
-              })
+              <p className="text-sm text-slate-600">
+                <span className="text-2xl font-bold text-slate-800">{queue.length}</span>{" "}
+                رسالة في انتظار الإرسال
+              </p>
             )}
           </div>
         </div>
@@ -534,7 +568,71 @@ function NumberCard({
           </div>
         </Modal>
       )}
+
+      {renaming && (
+        <RenameModal
+          current={number.label}
+          onClose={() => setRenaming(false)}
+          onSave={rename}
+        />
+      )}
     </div>
+  );
+}
+
+function RenameModal({
+  current,
+  onClose,
+  onSave,
+}: {
+  current: string | null;
+  onClose: () => void;
+  onSave: (label: string) => Promise<void>;
+}) {
+  const [value, setValue] = useState(current ?? "");
+  const [saving, setSaving] = useState(false);
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    setSaving(true);
+    try {
+      await onSave(value);
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "تعذّر حفظ الاسم");
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Modal
+      title="اسم الرقم"
+      onClose={onClose}
+      footer={
+        <>
+          <button type="button" onClick={onClose} className="rounded-xl border border-slate-300 px-4 py-2.5 font-medium text-slate-600 transition hover:bg-slate-50">
+            إلغاء
+          </button>
+          <button type="submit" form="rename-wa-form" disabled={saving} className="flex items-center gap-2 rounded-xl bg-accent px-5 py-2.5 font-medium text-white transition hover:bg-accent-hover disabled:opacity-60">
+            {saving ? <Loader2 className="h-5 w-5 animate-spin" /> : <Save className="h-5 w-5" />}
+            حفظ
+          </button>
+        </>
+      }
+    >
+      <form id="rename-wa-form" onSubmit={submit} className="space-y-3">
+        <p className="text-sm leading-6 text-slate-500">
+          اسم يساعدك على تمييز الرقم عن غيره، مثل: الرقم الأساسي، رقم الحجز.
+        </p>
+        <input
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          maxLength={60}
+          autoFocus
+          placeholder="اسم الرقم"
+          className={inputClass}
+        />
+      </form>
+    </Modal>
   );
 }
 
@@ -624,11 +722,13 @@ function AddNumberModal({
 function QrModal({
   apiBase,
   number,
+  managed = false,
   onClose,
   onConnected,
 }: {
   apiBase: string;
   number: WaNumber;
+  managed?: boolean;
   onClose: () => void;
   onConnected: () => Promise<void>;
 }) {
@@ -714,7 +814,7 @@ function QrModal({
     };
   }, [apiBase, number.id, onConnected, attempt]);
 
-  const title = number.label || number.instance_id;
+  const title = number.label || (managed ? "رقم واتساب" : number.instance_id);
 
   return (
     <Modal
