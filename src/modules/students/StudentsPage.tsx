@@ -547,6 +547,13 @@ export default function StudentsPage() {
               </div>
             )}
           </div>
+          {/* Rows-per-page sits beside the add button, not down by the table. */}
+          <div className="order-3 flex shrink-0 items-center gap-1.5 text-sm text-slate-500">
+            <span>عرض</span>
+            <div className="w-20">
+              <Select value={rows} onChange={setRows} options={ROWS_OPTIONS.map((r) => ({ value: r, label: r }))} />
+            </div>
+          </div>
           {canCreate && (
             <button
               onClick={() => setAddOpen(true)}
@@ -676,12 +683,6 @@ export default function StudentsPage() {
             محظور
           </span>
         </div>
-        <div className="flex items-center gap-2">
-          <span>عرض</span>
-          <div className="w-20">
-            <Select value={rows} onChange={setRows} options={ROWS_OPTIONS.map((r) => ({ value: r, label: r }))} />
-          </div>
-        </div>
       </div>
 
       {loading ? (
@@ -714,10 +715,10 @@ export default function StudentsPage() {
                   ♂/♀ mark, so it no longer needs a column. */}
               <col className="w-[5%]" />
               <col className="w-[7%]" />
-              <col className="w-[10%]" />
-              <col className="w-[10%]" />
-              {/* One menu button, so the narrowest column on the table. */}
-              <col className="w-[5%]" />
+              <col className="w-[8%]" />
+              <col className="w-[8%]" />
+              {/* Wide enough that the "إجراءات" header fits without being clipped. */}
+              <col className="w-[9%]" />
             </colgroup>
               <thead className={`${THEAD} font-medium`}>
                 <tr>
@@ -731,7 +732,7 @@ export default function StudentsPage() {
                   <th className="px-2 py-2.5">الحالة</th>
                   <th className="px-2 py-2.5">أنشئ في</th>
                   <th className="px-2 py-2.5">آخر تحديث</th>
-                  <th className="px-2 py-2.5 text-center">إجراءات</th>
+                  <th className="whitespace-nowrap px-2 py-2.5 text-center">إجراءات</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">

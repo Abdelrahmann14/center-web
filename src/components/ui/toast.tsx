@@ -10,8 +10,8 @@
 //   const id = toast.loading("جارٍ الرفع"); ... toast.dismiss(id);
 "use client";
 
-import type { ReactElement } from "react";
-import hotToast, { Toaster as HotToaster } from "react-hot-toast";
+import { useRef, useState, type ReactElement } from "react";
+import hotToast, { Toaster as HotToaster, ToastBar, type Toast } from "react-hot-toast";
 import { Info, TriangleAlert } from "@/components/icons";
 
 type ToastId = string;
@@ -84,9 +84,50 @@ export const toast = {
 };
 
 /**
+ * One toast, made swipeable: drag it left or right and, past a small threshold,
+ * it dismisses. Below the threshold it springs back. The library's own
+ * {@link ToastBar} is kept inside, so the pill, icons and enter/exit animation
+ * are unchanged - only a drag gesture is layered on top.
+ */
+function SwipeableToast({ t }: { t: Toast }) {
+  const [dx, setDx] = useState(0);
+  const startX = useRef<number | null>(null);
+  const dragging = startX.current !== null;
+
+  function end(dismiss: boolean) {
+    if (dismiss) hotToast.dismiss(t.id);
+    else setDx(0);
+    startX.current = null;
+  }
+
+  return (
+    <div
+      onPointerDown={(e) => {
+        startX.current = e.clientX;
+        setDx(0);
+      }}
+      onPointerMove={(e) => {
+        if (startX.current !== null) setDx(e.clientX - startX.current);
+      }}
+      onPointerUp={() => end(Math.abs(dx) > 80)}
+      onPointerCancel={() => end(false)}
+      style={{
+        transform: dx ? `translateX(${dx}px)` : undefined,
+        opacity: dx ? Math.max(0.2, 1 - Math.abs(dx) / 220) : 1,
+        transition: dragging ? "none" : "transform 0.2s ease, opacity 0.2s ease",
+        touchAction: "pan-y",
+        cursor: "grab",
+      }}
+    >
+      <ToastBar toast={t} />
+    </div>
+  );
+}
+
+/**
  * Mount once near the app root. Uses the library's default toast styling.
  * Position is role-driven by the caller: assistants/admins get "top-center",
- * the super admin keeps "top-right".
+ * the super admin keeps "top-right". Each toast can be swiped away left/right.
  */
 export function ToastViewport({
   position = "top-center",
@@ -112,7 +153,9 @@ export function ToastViewport({
           boxShadow: "0 10px 25px rgba(15,23,42,0.35)",
         },
       }}
-    />
+    >
+      {(t) => <SwipeableToast t={t} />}
+    </HotToaster>
   );
 }
 

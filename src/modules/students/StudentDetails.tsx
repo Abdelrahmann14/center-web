@@ -68,7 +68,6 @@ export function StudentDetails({
         <Info label="المنطقة السكنية" value={student.city} missing={missing.has("city")} />
         <Info label="النوع" value={student.gender} missing={missing.has("gender")} />
         <Info label="الديانة" value={student.religion} />
-        <Info label="الشعبة" value={student.academic_track} missing={missing.has("academic_track")} />
 
         <Info label="سعر الحصة" value={<PriceValue student={student} />} />
         {student.is_discounted && (

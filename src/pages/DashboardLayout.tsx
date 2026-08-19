@@ -160,7 +160,10 @@ export default function DashboardLayout() {
       )}
 
       <aside
-        className={`z-40 flex w-64 flex-col overflow-hidden rounded-[20px] bg-dark text-slate-200 transition-transform duration-200 max-lg:fixed max-lg:inset-y-2 max-lg:right-2 sm:max-lg:inset-y-3 sm:max-lg:right-3 max-lg:shadow-2xl lg:static lg:translate-x-0 ${
+        // Rounded on the outer (screen) side only; the inner edge that faces the
+        // content stays straight. In RTL the sidebar sits on the right, so the
+        // start side (rounded-s) is the outer one.
+        className={`z-40 flex w-64 flex-col overflow-hidden rounded-s-[20px] bg-dark text-slate-200 transition-transform duration-200 max-lg:fixed max-lg:inset-y-2 max-lg:right-2 sm:max-lg:inset-y-3 sm:max-lg:right-3 max-lg:shadow-2xl lg:static lg:translate-x-0 ${
           mobileOpen ? "max-lg:translate-x-0" : "max-lg:translate-x-[calc(100%+0.75rem)]"
         }`}
       >

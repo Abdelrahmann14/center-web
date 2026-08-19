@@ -8,7 +8,7 @@ import { useOnline } from "@/lib/useOnline";
 import { useSync } from "@/sync/SyncProvider";
 import { useWhatsappCheck, type WaStatus } from "@/lib/useWhatsappCheck";
 import { NAME_MIN_PARTS, nameParts, isFullName } from "@/lib/studentName";
-import { TRACK_OPTIONS, RELIGIONS, GENDERS, type TrackKind } from "@/lib/tracks";
+import { RELIGIONS, GENDERS, type TrackKind } from "@/lib/tracks";
 import { Modal, Field, Select, FieldError, FormNotice, AutocompleteInput, advanceOnEnter, inputClass } from "@/components/ui";
 import { useToast } from "@/components/Toast";
 
@@ -217,7 +217,6 @@ export function StudentForm({
   const [city, setCity] = useState(initial?.city ?? "");
   const [gender, setGender] = useState(initial?.gender ?? GENDERS[0]);
   const [groupId, setGroupId] = useState(initial?.group_id ?? "");
-  const [track, setTrack] = useState(initial?.academic_track ?? "");
   const [religion, setReligion] = useState(initial?.religion ?? RELIGIONS[0]);
   const [price, setPrice] = useState(initial?.lesson_price != null ? String(initial.lesson_price) : "");
   const [discountReason, setDiscountReason] = useState(initial?.discount_reason ?? "");
@@ -256,15 +255,13 @@ export function StudentForm({
   // would paint the form red as the user tabs through it - they have not failed
   // to fill it in, they have not reached it yet.
   const O = {
-    name: 1, school: 2, city: 3, grade: 4, track: 5, group: 6,
+    name: 1, school: 2, city: 3, grade: 4, group: 6,
     gender: 7, religion: 8, price: 9, discount: 10, sphone: 11, pphone: 12, notes: 13,
   };
   const touch = (key: string) => setTouched((t) => (t[key] ? t : { ...t, [key]: true }));
   const showContent = (key: string) => touched[key] === true || attempted;
   const req = (_o: number, v: string) => (attempted && !v.trim() ? "مطلوب" : null);
 
-  const trackKind: TrackKind = grades.find((g) => g.name === grade)?.track_kind ?? "none";
-  const trackOptions = TRACK_OPTIONS[trackKind];
   const groupOptions = groups.filter((g) => g.grade === grade && !g.deleted);
 
   const selectedGroup = groups.find((g) => g.id === groupId);
@@ -326,11 +323,9 @@ export function StudentForm({
     : null;
   const nameError = nameErrorRaw ? (showContent("name") ? nameErrorRaw : null) : req(O.name, name);
 
-  // A discount must be justified: at least 10 characters, only when discounted.
+  // A discount needs a reason, but any text - no minimum length.
   const discountReasonErrorRaw =
-    discounted && discountReason.trim().length < 10
-      ? "اذكر سبب الخصم (١٠ أحرف على الأقل)"
-      : null;
+    discounted && !discountReason.trim() ? "اذكر سبب الخصم" : null;
   const discountReasonError = showContent("discount") ? discountReasonErrorRaw : null;
   const priceError = showContent("price") ? priceErrorRaw : null;
 
@@ -386,7 +381,6 @@ export function StudentForm({
   const schoolIncomplete = mark(!school.trim());
   const cityIncomplete = mark(!city.trim());
   const gradeIncomplete = mark(!grade);
-  const trackIncomplete = mark(trackOptions.length > 0 && !track);
   const groupIncomplete = mark(!groupId);
   const sPhonesIncomplete = mark(spAllEmpty);
   const pPhonesIncomplete = mark(ppAllEmpty);
@@ -398,7 +392,6 @@ export function StudentForm({
     setCity("");
     setGender(GENDERS[0]);
     setGroupId("");
-    setTrack("");
     setReligion(RELIGIONS[0]);
     setPrice("");
     setDiscountReason("");
@@ -412,7 +405,6 @@ export function StudentForm({
 
   function onGradeChange(newGrade: string) {
     setGrade(newGrade);
-    setTrack("");
     setGroupId("");
     setPrice("");
   }
@@ -445,7 +437,6 @@ export function StudentForm({
       !gender ||
       !grade ||
       !groupId ||
-      (trackOptions.length > 0 && !track) ||
       sp.length === 0 ||
       pp.length === 0;
     if (missing || hasFieldErrors) return;
@@ -460,7 +451,7 @@ export function StudentForm({
       student_phones: sp,
       parent_phones: pp,
       religion,
-      academic_track: trackOptions.length > 0 ? track : null,
+      academic_track: null,
       lesson_price: priceNum,
       discount_reason: discounted ? discountReason.trim() : null,
       notes: notes.trim() || null,
@@ -655,17 +646,6 @@ export function StudentForm({
           />
         </Field>
 
-        {trackOptions.length > 0 && (
-          <Field label="الشعبة" filled={!!track} incomplete={trackIncomplete}>
-            <FieldError message={req(O.track, track)} />
-            <Select
-              value={track}
-              onChange={setTrack}
-              placeholder=""
-              options={trackOptions.map((t) => ({ value: t, label: t }))}
-            />
-          </Field>
-        )}
 
         <Field
           label="المجموعة"
@@ -730,8 +710,8 @@ export function StudentForm({
           )}
         </Field>
 
-        {/* Appears only when the price is below the center's - a discount must
-            be justified, at least 10 characters. */}
+        {/* Appears only when the price is below the center's - a discount needs
+            a reason, but any text. */}
         {discounted && (
           <div className="sm:col-span-2 lg:col-span-3">
             <Field label="سبب الخصم" filled={!!discountReason} multiline>
