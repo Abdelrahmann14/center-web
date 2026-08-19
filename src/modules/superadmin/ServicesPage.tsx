@@ -6,7 +6,6 @@ import {
   Pencil,
   LogOut,
   CheckCircle2,
-  XCircle,
   Smartphone,
   MessageCircle,
   QrCode,
@@ -15,7 +14,6 @@ import {
   Clock,
   RotateCcw,
   ListChecks,
-  History,
 } from "@/components/icons";
 import { api, ApiError } from "@/lib/api";
 import { toast } from "@/components/ui/toast";
@@ -49,25 +47,7 @@ interface QueueItem {
   message?: string;
 }
 
-/** A sent-message log row (mirror of the "الرسائل" history table). */
-interface LogRow {
-  id: string;
-  recipient_name: string | null;
-  phone: string | null;
-  body: string;
-  status: string;
-  created_at: string;
-}
-
 const SERVICE_TABS = [{ key: "whatsapp", label: "واتساب", icon: MessageCircle }] as const;
-
-const fmtWhen = (iso: string) =>
-  new Date(iso).toLocaleString("ar-EG", {
-    day: "2-digit",
-    month: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
 
 export default function ServicesPage({ apiBase = "/super/services/whatsapp" }: { apiBase?: string }) {
   const [tab] = useState<(typeof SERVICE_TABS)[number]["key"]>("whatsapp");
@@ -286,15 +266,15 @@ function NumberCard({
     void loadQueue();
   }, [loadQueue]);
 
-  // Recent messages the system actually sent (the shared "الرسائل" log). Failing
-  // to load it (e.g. no permission) just leaves the section empty.
-  const [sent, setSent] = useState<LogRow[] | null>(null);
+  // How many messages the system has sent (the total of the shared log). Just a
+  // count - the messages themselves live on the "الرسائل" page.
+  const [sentCount, setSentCount] = useState<number | null>(null);
   useEffect(() => {
     let alive = true;
     api
-      .get<{ content: LogRow[] }>("/messaging/whatsapp/log?size=8&sort=createdAt,desc")
-      .then((r) => alive && setSent(r.content ?? []))
-      .catch(() => alive && setSent([]));
+      .get<{ total_elements: number }>("/messaging/whatsapp/log?size=1")
+      .then((r) => alive && setSentCount(r.total_elements ?? 0))
+      .catch(() => alive && setSentCount(null));
     return () => {
       alive = false;
     };
@@ -411,18 +391,15 @@ function NumberCard({
         )}
       </div>
 
-      {/* Send delay + outgoing queue, side by side on wide screens. */}
+      {/* Send delay + message counts, side by side on wide screens. */}
       <div className="mt-4 grid gap-4 border-t border-slate-100 pt-4 lg:grid-cols-2">
-        {/* Send delay - the pause Green API leaves between outgoing messages. */}
+        {/* Send delay. */}
         <div className="rounded-xl border border-slate-100 bg-slate-50/50 p-3">
           <div className="flex items-center gap-1.5 text-sm font-semibold text-slate-700">
             <Clock className="h-4 w-4 text-slate-400" />
             التأخير بين الرسائل
           </div>
-          <p className="mt-0.5 text-xs text-slate-400">
-            المدة التي ينتظرها Green API بين كل رسالة والتالية. يعيد تشغيل الرقم عند الحفظ وتسري خلال
-            دقائق.
-          </p>
+          <p className="mt-0.5 text-xs text-slate-400">المدة بين كل رسالة والتالية. تسري خلال دقائق من الحفظ.</p>
           <div className="mt-2 flex flex-wrap items-center gap-2">
             <input
               type="number"
@@ -448,17 +425,13 @@ function NumberCard({
           </div>
         </div>
 
-        {/* Outgoing queue (what is still waiting to be sent on Green API). */}
+        {/* Message counts only: waiting to be sent, and already sent. No list,
+            no text - the messages themselves live on the "الرسائل" page. */}
         <div className="rounded-xl border border-slate-100 bg-slate-50/50 p-3">
           <div className="flex items-center justify-between gap-2">
             <div className="flex items-center gap-1.5 text-sm font-semibold text-slate-700">
               <ListChecks className="h-4 w-4 text-slate-400" />
-              طابور الإرسال
-              {queue && (
-                <span className="rounded-full bg-slate-200 px-2 py-0.5 text-[11px] font-semibold text-slate-600">
-                  {queue.length}
-                </span>
-              )}
+              الرسائل
             </div>
             <button
               type="button"
@@ -470,59 +443,20 @@ function NumberCard({
               <RotateCcw className={`h-4 w-4 ${queueLoading ? "animate-spin" : ""}`} />
             </button>
           </div>
-          <p className="mt-0.5 text-xs text-slate-400">
-            عدد الرسائل التي ما زالت تنتظر الإرسال من هذا الرقم على Green API. نص كل
-            رسالة موجود في سجل «الرسائل».
-          </p>
-          <div className="mt-2">
-            {queue === null ? (
-              <p className="text-xs text-slate-400">جارٍ التحميل…</p>
-            ) : (
-              <p className="text-sm text-slate-600">
-                <span className="text-2xl font-bold text-slate-800">{queue.length}</span>{" "}
-                رسالة في انتظار الإرسال
-              </p>
-            )}
-          </div>
-        </div>
-      </div>
-
-      {/* Recent messages the system actually sent out. */}
-      <div className="mt-4 border-t border-slate-100 pt-4">
-        <div className="flex items-center gap-1.5 text-sm font-semibold text-slate-700">
-          <History className="h-4 w-4 text-slate-400" />
-          آخر الرسائل الصادرة من النظام
-        </div>
-        <div className="mt-2 space-y-1.5">
-          {sent === null ? (
-            <p className="text-xs text-slate-400">جارٍ التحميل…</p>
-          ) : sent.length === 0 ? (
-            <p className="text-xs text-slate-400">لا توجد رسائل صادرة بعد.</p>
-          ) : (
-            sent.map((m) => (
-              <div
-                key={m.id}
-                className="flex items-start gap-2 rounded-lg border border-slate-100 bg-slate-50/50 px-3 py-2"
-              >
-                {m.status === "SENT" ? (
-                  <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-green-600" />
-                ) : (
-                  <XCircle className="mt-0.5 h-4 w-4 shrink-0 text-rose-500" />
-                )}
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="truncate text-sm font-medium text-slate-700" dir="auto">
-                      {m.recipient_name || m.phone || "—"}
-                    </span>
-                    <span className="shrink-0 text-[11px] text-slate-400">{fmtWhen(m.created_at)}</span>
-                  </div>
-                  <p className="mt-0.5 truncate text-xs text-slate-500" dir="auto" title={m.body}>
-                    {m.body}
-                  </p>
-                </div>
+          <div className="mt-3 grid grid-cols-2 gap-2">
+            <div className="rounded-lg bg-white px-3 py-2 text-center">
+              <div className="text-2xl font-bold text-slate-800">
+                {queue === null ? "…" : queue.length.toLocaleString("ar-EG")}
               </div>
-            ))
-          )}
+              <div className="mt-0.5 text-xs text-slate-400">في الانتظار</div>
+            </div>
+            <div className="rounded-lg bg-white px-3 py-2 text-center">
+              <div className="text-2xl font-bold text-slate-800">
+                {sentCount === null ? "—" : sentCount.toLocaleString("ar-EG")}
+              </div>
+              <div className="mt-0.5 text-xs text-slate-400">تم إرسالها</div>
+            </div>
+          </div>
         </div>
       </div>
 

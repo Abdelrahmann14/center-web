@@ -691,10 +691,7 @@ export default function StudentsPage() {
         // shares are kept - they are right whenever there is room - and a floor
         // is put under them, so on a narrow screen the TABLE scrolls sideways
         // inside its own box instead of the whole page doing it.
-        <>
-        {/* Wide table on a laptop/tablet; a phone gets the stacked cards below
-            instead, so the grade and the actions are never lost off-screen. */}
-        <div className="mt-3 hidden overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-sm sm:block">
+        <div className="mt-3 overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-sm">
           <table className="w-full min-w-[1000px] table-fixed text-right text-sm">
             <colgroup>
               {/* Shares, adding up to exactly 100. App and Google columns moved
@@ -868,112 +865,6 @@ export default function StudentsPage() {
               </tbody>
           </table>
         </div>
-
-        {/* Phone: a card per student. The grade sits right under the name and
-            the actions are a plain button, so nothing hides off the side of a
-            scrolling table. The left border carries the same colour key as the
-            table rows. */}
-        <div className="mt-3 space-y-2 sm:hidden">
-          {visibleRows.map((s) => {
-            const { g, missing, dupNamePhone, dupParent, rowActions } = rowMeta(s);
-            const border = !s.is_active
-              ? "border-s-4 border-s-rose-400 bg-rose-50"
-              : dupNamePhone
-                ? "border-s-4 border-s-purple-400 bg-purple-50"
-                : dupParent
-                  ? "border-s-4 border-s-sky-400 bg-sky-50"
-                  : missing
-                    ? "border-s-4 border-s-amber-400 bg-amber-50"
-                    : "border-s-4 border-s-transparent bg-white";
-            return (
-              <div
-                key={s.id}
-                onClick={() => setViewStudent(s)}
-                className={`rounded-2xl border border-slate-200 p-3 shadow-sm ${border}`}
-              >
-                <div className="flex items-start justify-between gap-2">
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-1.5">
-                      <span className="shrink-0 text-xs font-medium text-slate-400">#{s.serial}</span>
-                      <span className="truncate font-semibold text-slate-800" title={s.name}>
-                        {s.name}
-                      </span>
-                    </div>
-                    <div className="mt-0.5 flex items-center gap-1.5 text-xs text-slate-500">
-                      <span>{s.grade || "—"}</span>
-                      {s.gender && (
-                        <span
-                          title={s.gender}
-                          className={s.gender === "أنثى" ? "text-pink-500" : "text-sky-600"}
-                        >
-                          {s.gender === "أنثى" ? "♀" : "♂"}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                  <div className="shrink-0" onClick={(e) => e.stopPropagation()}>
-                    {rowActions.length > 0 && <RowActionsMenu actions={rowActions} />}
-                  </div>
-                </div>
-
-                <dl className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1.5 text-xs">
-                  <div>
-                    <dt className="text-slate-400">رقم الطالب</dt>
-                    <dd className="tabular-nums text-slate-700" dir="ltr">
-                      {s.student_phones.length ? s.student_phones.join(" · ") : "—"}
-                    </dd>
-                  </div>
-                  <div>
-                    <dt className="text-slate-400">رقم ولي الأمر</dt>
-                    <dd className="tabular-nums text-slate-700" dir="ltr">
-                      {s.parent_phones.length ? s.parent_phones.join(" · ") : "—"}
-                    </dd>
-                  </div>
-                  <div>
-                    <dt className="text-slate-400">المدرسة</dt>
-                    <dd className="text-slate-700">{s.school || "—"}</dd>
-                  </div>
-                  <div>
-                    <dt className="text-slate-400">المجموعة</dt>
-                    <dd className="text-slate-700">{g ? groupLabel(g) : "—"}</dd>
-                  </div>
-                  <div>
-                    <dt className="text-slate-400">السعر</dt>
-                    <dd className="text-slate-700">
-                      {s.lesson_price == null ? (
-                        "—"
-                      ) : s.lesson_price === 0 ? (
-                        <span className="text-green-700">معفي</span>
-                      ) : (
-                        <Money value={s.lesson_price} className="text-slate-700" />
-                      )}
-                    </dd>
-                  </div>
-                  <div>
-                    <dt className="text-slate-400">الحالة</dt>
-                    <dd>
-                      {s.is_active ? (
-                        <span className="text-slate-700">نشط</span>
-                      ) : (
-                        <span className="flex items-center gap-1 font-medium text-rose-700">
-                          <Ban className="h-3 w-3 shrink-0" />
-                          محظور
-                        </span>
-                      )}
-                    </dd>
-                  </div>
-                </dl>
-              </div>
-            );
-          })}
-          {visibleRows.length === 0 && (
-            <div className="rounded-2xl border border-slate-200 bg-white py-16 text-center text-slate-400">
-              <Users className="mx-auto mb-2 h-10 w-10 text-slate-300" />
-              {hasFilters || anyColFilter ? "لا توجد نتائج مطابقة" : "لا يوجد طلاب بعد"}
-            </div>
-          )}
-        </div>
-        </>
       )}
 
       {!loading && <Pagination current={current} totalPages={totalPages} onChange={setPage} />}
