@@ -558,8 +558,10 @@ export default function StudentsPage() {
           )}
         </div>
 
-        {/* Row 2 - filter chips */}
-        <div className="mt-5 flex flex-wrap items-center gap-2">
+        {/* Row 2 - filter chips. On a phone they sit on ONE line that scrolls
+            sideways instead of wrapping onto four rows that ate half the screen;
+            from sm up they wrap as before. */}
+        <div className="mt-4 flex items-center gap-2 overflow-x-auto whitespace-nowrap pb-1 [&>*]:shrink-0 sm:mt-5 sm:flex-wrap sm:overflow-visible sm:whitespace-normal sm:pb-0">
           {shownFields.map((f) => (
             <MultiSelectFilter
               key={f.key}
@@ -617,7 +619,7 @@ export default function StudentsPage() {
           {hasFilters && (
             <button
               onClick={clearFilters}
-              className="ms-auto flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm font-medium text-rose-600 transition hover:bg-rose-50"
+              className="flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm font-medium text-rose-600 transition hover:bg-rose-50 sm:ms-auto"
             >
               <X className="h-4 w-4" />
               مسح الكل
@@ -729,35 +731,30 @@ export default function StudentsPage() {
                   <th className="px-2 py-2.5">الحالة</th>
                   <th className="px-2 py-2.5">أنشئ في</th>
                   <th className="px-2 py-2.5">آخر تحديث</th>
-                  {/* Frozen to the edge so it stays reachable while the wide
-                      table scrolls sideways on a phone. */}
-                  <th className="sticky left-0 z-20 bg-dark px-2 py-2.5 text-center shadow-[1px_0_0_theme(colors.slate.700)]">
-                    إجراءات
-                  </th>
+                  <th className="px-2 py-2.5 text-center">إجراءات</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {visibleRows.map((s) => {
                   const { g, missing, dupNamePhone, dupParent, rowActions } = rowMeta(s);
                   // Priority: blocked (rose) → name/phone dup (purple) → shared
-                  // parent (sky) → incomplete (amber) → none. The frozen actions
-                  // cell repeats the row fill so it blends in while pinned.
+                  // parent (sky) → incomplete (amber) → none.
                   const tone = !s.is_active
-                    ? { row: "bg-rose-100 hover:bg-rose-200", cell: "bg-rose-100 group-hover:bg-rose-200" }
+                    ? "bg-rose-100 hover:bg-rose-200"
                     : dupNamePhone
-                      ? { row: "bg-purple-100 hover:bg-purple-200", cell: "bg-purple-100 group-hover:bg-purple-200" }
+                      ? "bg-purple-100 hover:bg-purple-200"
                       : dupParent
-                        ? { row: "bg-sky-100 hover:bg-sky-200", cell: "bg-sky-100 group-hover:bg-sky-200" }
+                        ? "bg-sky-100 hover:bg-sky-200"
                         : missing
-                          ? { row: "bg-amber-100 hover:bg-amber-200", cell: "bg-amber-100 group-hover:bg-amber-200" }
-                          : { row: "hover:bg-slate-50/60", cell: "bg-white group-hover:bg-slate-50" };
+                          ? "bg-amber-100 hover:bg-amber-200"
+                          : "hover:bg-slate-50/60";
                   return (
                     <tr
                       key={s.id}
                       // The whole row opens the full detail view; the action
                       // buttons stop propagation so they still do their own thing.
                       onClick={() => setViewStudent(s)}
-                      className={`group h-14 cursor-pointer transition ${tone.row}`}
+                      className={`h-14 cursor-pointer transition ${tone}`}
                     >
                       <td className="px-2 font-medium text-slate-400">{s.serial}</td>
                       <td className="px-2">
@@ -842,13 +839,9 @@ export default function StudentsPage() {
                       <td className="px-2"><AuditCell at={s.created_at} by={s.created_by} /></td>
                       <td className="px-2"><AuditCell at={s.updated_at} by={s.updated_by} /></td>
                       {/* One menu instead of a strip of icons: every action
-                          keeps its name and the column keeps its width. Frozen to
-                          the edge so it stays reachable on a phone; the fill
-                          matches the row so scrolling content hides behind it. */}
-                      <td
-                        className={`sticky left-0 z-10 px-2 shadow-[1px_0_0_theme(colors.slate.200)] ${tone.cell}`}
-                        onClick={(e) => e.stopPropagation()}
-                      >
+                          keeps its name and the column keeps its width. A normal
+                          column - it scrolls with the rest of the table. */}
+                      <td className="px-2 text-center" onClick={(e) => e.stopPropagation()}>
                         {rowActions.length > 0 && <RowActionsMenu actions={rowActions} />}
                       </td>
                     </tr>
