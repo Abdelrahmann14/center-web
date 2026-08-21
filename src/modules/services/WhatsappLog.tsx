@@ -3,6 +3,7 @@ import {
   Search, X, MessageCircle, Users, Clock, CheckCircle2, Ban, RotateCcw, Trash2, Loader2,
 } from "@/components/icons";
 import { cachedGetAll, invalidate } from "@/lib/dataCache";
+import { useAuth } from "@/auth/AuthContext";
 import { api, ApiError } from "@/lib/api";
 import { toast } from "@/components/ui/toast";
 import { usePageState } from "@/lib/pageState";
@@ -136,6 +137,12 @@ function HistoryTab() {
   const [perPageStr, setPerPageStr] = usePageState("messages.rows", "25");
   const [colF, setColF] = useState<Partial<Record<FieldKey, Set<string>>>>({});
   const [clearing, setClearing] = useState(false);
+  // Reading the history and erasing it are two different grants. Somebody with
+  // only the first must not be shown a button that will 403 - the server
+  // refuses it either way, but a door that leads nowhere is removed, not
+  // labelled.
+  const { can } = useAuth();
+  const mayClear = can("NOTIFICATION_LOG_DELETE");
   const perPage = Number(perPageStr) || 25;
   const debounced = useDebounced(search);
   const mounted = useRef(false);
@@ -235,14 +242,16 @@ function HistoryTab() {
             كل الأيام
           </button>
         )}
-        <button
-          type="button"
-          onClick={() => setClearing(true)}
-          className="flex items-center gap-1.5 rounded-xl border border-slate-300 px-3 py-2 text-sm font-medium text-slate-600 transition hover:border-rose-300 hover:bg-rose-50 hover:text-rose-700"
-        >
-          <Trash2 className="h-4 w-4" />
-          مسح السجل
-        </button>
+        {mayClear && (
+          <button
+            type="button"
+            onClick={() => setClearing(true)}
+            className="flex items-center gap-1.5 rounded-xl border border-slate-300 px-3 py-2 text-sm font-medium text-slate-600 transition hover:border-rose-300 hover:bg-rose-50 hover:text-rose-700"
+          >
+            <Trash2 className="h-4 w-4" />
+            مسح السجل
+          </button>
+        )}
         <div className="ms-auto flex items-center gap-2 text-sm text-slate-500">
           <span>عرض</span>
           <div className="w-20">
@@ -320,7 +329,14 @@ function HistoryTab() {
                   </td>
                   <td className="px-4 py-3 text-xs text-slate-500">
                     <div>{SOURCE_AR[r.source] ?? r.source}</div>
-                    {r.source === "MANUAL" && r.sent_by_name && <div className="text-slate-400">{r.sent_by_name}</div>}
+                    {/* Who sent it, on every row - not only the manual ones.
+                        With sending delegated to several assistants, "who sent
+                        this" is the first question anybody asks of the log, and
+                        a blank cell used to answer it with silence. An automatic
+                        message has no person behind it, and says so. */}
+                    <div className="text-slate-400">
+                      {r.sent_by_name ?? (r.source === "SYSTEM" ? "تلقائي" : "—")}
+                    </div>
                   </td>
                   <td className="px-4 py-3 text-xs text-slate-500" dir="ltr">
                     <span className="inline-flex items-center gap-1"><Clock className="h-3.5 w-3.5" />{fmtDateTime(r.created_at)}</span>

@@ -6,6 +6,7 @@ import {
   BookOpen,
   ClipboardCheck,
   ReceiptText,
+  MessageCircle,
   FileQuestion,
   ChartColumn,
   CalendarRange,
@@ -66,6 +67,10 @@ const NAV: NavItem[] = [
   { to: "/lesson-registration", label: "تسجيل الحصة", icon: <ClipboardCheck className="h-5 w-5" />, perm: ["REGISTRATION_ACCESS"], offline: true },
   // Invoices, not a wallet - it matches what the page actually draws.
   { to: "/financials", label: "الحسابات", icon: <ReceiptText className="h-5 w-5" />, perm: ["FINANCE_VIEW"], offline: true },
+  // Not `offline`: a conversation is a live thing. The mirror cannot answer a
+  // thread, and a chat screen that opens empty with no way to refresh is worse
+  // than no door at all.
+  { to: "/messages", label: "الرسائل", icon: <MessageCircle className="h-5 w-5" />, perm: ["NOTIFICATION_SEND", "NOTIFICATION_LOG_VIEW"] },
   // An exam is a question paper; this is the only "?" in the set.
   { to: "/exams", label: "الاختبارات", icon: <FileQuestion className="h-5 w-5" />, perm: ["EXAM_CREATE", "EXAM_UPDATE", "EXAM_DELETE", "EXAM_PUBLISH"] },
   // Columns, not a trend line: the data is per-lesson counts, not a time series.

@@ -1,35 +1,28 @@
 import { useEffect, useState } from "react";
-import {
-  ChartColumn,
-  History,
-  MessageCircle,
-  MessageSquareText,
-  ShieldAlert,
-} from "@/components/icons";
+import { ChartColumn, MessageSquareText, ShieldAlert } from "@/components/icons";
 import { api } from "@/lib/api";
-import { arabicDigits } from "@/lib/datetime";
 import { LoaderBlock } from "@/components/PencilLoader";
 import { WhatsappDashboard } from "@/modules/services/WhatsappDashboard";
-import { WhatsappInbox, useInboxUnread } from "@/modules/services/WhatsappInbox";
 import { WhatsappMessagePreviews } from "@/modules/services/WhatsappMessagePreviews";
-import { WhatsappLog } from "@/modules/services/WhatsappLog";
 
-type TabKey = "dashboard" | "inbox" | "templates" | "log";
+type TabKey = "dashboard" | "templates";
 
 /**
- * Four tabs, in the order the questions get asked.
+ * What is left here is the ACCOUNT, not the messaging.
  *
- * <p>"الرسائل" is the INBOX - real conversations with real people. It used to be
- * the name of the template gallery, which was the wrong word twice over: nothing
- * on that screen is a message anybody sent, and it left the product with no word
- * for the thing a teacher actually calls messages. The gallery is "القوالب",
- * which is what it holds.
+ * <p>The conversations and the send history moved to their own screen in the
+ * sidebar («الرسائل») because they are daily desk work and this section is
+ * admin-only settings - an assistant could never reach them here. What belongs
+ * in الخدمات is the pair of questions only the owner asks: is the account
+ * healthy, and what wording does it send.
+ *
+ * <p>"القوالب" was called "الرسائل" until the inbox existed, which was the
+ * wrong word twice over: nothing on it is a message anybody sent, and it left
+ * the product with no name for the thing a teacher actually calls messages.
  */
 const TABS: { key: TabKey; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
-  { key: "dashboard", label: "المتابعة", icon: ChartColumn },
-  { key: "inbox", label: "الرسائل", icon: MessageCircle },
+  { key: "dashboard", label: "الإحصائيات", icon: ChartColumn },
   { key: "templates", label: "القوالب", icon: MessageSquareText },
-  { key: "log", label: "السجل", icon: History },
 ];
 
 /**
@@ -45,11 +38,6 @@ const TABS: { key: TabKey; label: string; icon: React.ComponentType<{ className?
 export default function AdminWhatsappPage() {
   const [enabled, setEnabled] = useState<boolean | null>(null);
   const [tab, setTab] = useState<TabKey>("dashboard");
-  // Polled from whichever tab is open, so somebody watching the dashboard still
-  // learns that a parent has written. Only once WhatsApp is actually enabled -
-  // otherwise every workspace without it would poll an endpoint that can only
-  // answer zero.
-  const { unread } = useInboxUnread(enabled === true);
 
   useEffect(() => {
     api
@@ -91,25 +79,12 @@ export default function AdminWhatsappPage() {
           >
             <Icon className="h-4 w-4" />
             {label}
-            {/* The count rides on the tab rather than replacing its label: it is
-                news, not the name of the place. */}
-            {key === "inbox" && unread > 0 && (
-              <span
-                className={`rounded-full px-1.5 py-0.5 text-[10px] font-bold leading-none ${
-                  tab === key ? "bg-accent text-white" : "bg-accent/90 text-white"
-                }`}
-              >
-                {arabicDigits(unread)}
-              </span>
-            )}
           </button>
         ))}
       </div>
 
       {tab === "dashboard" && <WhatsappDashboard />}
-      {tab === "inbox" && <WhatsappInbox />}
       {tab === "templates" && <WhatsappMessagePreviews />}
-      {tab === "log" && <WhatsappLog />}
     </div>
   );
 }

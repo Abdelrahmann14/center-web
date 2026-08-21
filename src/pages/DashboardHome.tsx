@@ -9,7 +9,7 @@ import {
   ChartColumn,
   CalendarRange,
   UserCog,
-  Megaphone,
+  MessageCircle,
   Plug,
   ArrowLeft,
   UserPlus,
@@ -124,12 +124,14 @@ const MODULES: ModuleCard[] = [
     module: "ASSISTANTS",
   },
   {
-    to: "/notifications",
-    title: "الإشعارات والمراسلات",
-    desc: "إرسال الإشعارات لطلابك وإدارة الرسائل",
-    icon: <Megaphone className="h-6 w-6" />,
+    // Same destination and the same icon as the sidebar's "الرسائل": an icon is
+    // a name, and two names for one screen means neither is ever learned.
+    to: "/messages",
+    title: "الرسائل",
+    desc: "محادثات واتساب وسجل الرسائل المرسلة",
+    icon: <MessageCircle className="h-6 w-6" />,
     section: "comms",
-    perm: ["NOTIFICATION_SEND"],
+    perm: ["NOTIFICATION_SEND", "NOTIFICATION_LOG_VIEW"],
   },
   {
     to: "/services",

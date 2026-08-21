@@ -40,6 +40,7 @@ const GradesPage = lazy(() => import("@/modules/grades/GradesPage"));
 const ServiceIntegrationsPage = lazy(() => import("@/modules/services/ServiceIntegrationsPage"));
 const StudentsPage = lazy(() => import("@/modules/students/StudentsPage"));
 const StudentAnalyticsPage = lazy(() => import("@/modules/students/StudentAnalyticsPage"));
+const MessagesPage = lazy(() => import("@/modules/messaging/MessagesPage"));
 const LecturesPage = lazy(() => import("@/modules/lectures/LecturesPage"));
 const LessonGroupPage = lazy(() => import("@/modules/lectures/LessonGroupPage"));
 const LessonRegistrationPage = lazy(() => import("@/modules/registration/LessonRegistrationPage"));
@@ -210,7 +211,23 @@ export default function App() {
           <Route path="analytics" element={adminScreen("ANALYTICS") ? <AnalyticsPage /> : <Navigate to="/" replace />} />
           <Route path="grades" element={adminScreen("GROUPS") ? <GradesPage /> : <Navigate to="/" replace />} />
           <Route path="users" element={adminScreen("ASSISTANTS") ? <UsersPage /> : <Navigate to="/" replace />} />
-          <Route path="notifications" element={<Navigate to="/services" replace />} />
+          {/* The Messages screen: conversations and the send history, each on
+              its own grant. It is not admin-only - answering a parent is desk
+              work, and the page itself shows only the tabs the principal holds.
+              A user with neither grant lands back home rather than on an empty
+              screen. */}
+          <Route
+            path="messages"
+            element={
+              can("NOTIFICATION_SEND") || can("NOTIFICATION_LOG_VIEW") ? (
+                <MessagesPage />
+              ) : (
+                <Navigate to="/" replace />
+              )
+            }
+          />
+          {/* Both old doors to this screen now lead to it. */}
+          <Route path="notifications" element={<Navigate to="/messages" replace />} />
           <Route
             path="services"
             element={isAdmin ? <ServiceIntegrationsPage /> : <Navigate to="/" replace />}
