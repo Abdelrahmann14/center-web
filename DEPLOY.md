@@ -1,11 +1,28 @@
-# Deploying the Center web app to Vercel
+# Deploying the Center web app
 
-A static Vite build — no server side, no serverless functions. Vercel builds it
-and serves `dist/`.
+A static Vite build — no server side, no serverless functions.
 
-## Project settings
+## How it is actually deployed
+
+```powershell
+./deploy-hetzner.ps1
+```
+
+It builds `dist/` locally and copies it to `/root/center-backend/web` on the
+Hetzner box, where Caddy serves it as static files on the same origin as the
+API. Nothing restarts — Caddy reads the mounted volume live, so the new build
+is served the moment the copy finishes.
+
+Because it is same-origin with the API, `VITE_API_URL` is left EMPTY: the app
+calls `/api` directly and the backend needs no `CORS_ALLOWED_ORIGINS` entry.
+
+Everything below documents the Vercel setup, which this project no longer uses.
+`vercel.json` is kept for the same reason — nothing reads it today.
+
+## Vercel (unused)
 
 Vercel reads `vercel.json`, so the defaults it detects are already correct:
+
 
 | | |
 | --- | --- |
