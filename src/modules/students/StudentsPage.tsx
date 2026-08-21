@@ -12,7 +12,6 @@ import {
   Users,
   Users2,
   Copy,
-  MessageCircle,
   SlidersHorizontal,
   Plus,
 } from "@/components/icons";
@@ -70,20 +69,6 @@ interface Backlog {
 /** POST /students/barcode/send-pending - one batch, and what is left after it. */
 interface BarcodeBatch {
   sent: number;
-  failed: number;
-  remaining: number;
-  blocked_reason: string | null;
-}
-
-/** GET /messaging/whatsapp/check-numbers/pending */
-interface CheckBacklog {
-  pending: number;
-  blocked_reason: string | null;
-}
-
-/** POST /messaging/whatsapp/check-numbers - one batch of checking. */
-interface CheckBatch {
-  checked: number;
   failed: number;
   remaining: number;
   blocked_reason: string | null;
@@ -220,10 +205,6 @@ export default function StudentsPage() {
   // answers "is this number registered" - so this is what the delivery reports
   // for this teacher's own number have said so far.
   const [reach, setReach] = useState<Record<string, boolean>>({});
-  /** How many roster numbers have never been checked, and whether we may. */
-  const [checkBacklog, setCheckBacklog] = useState<CheckBacklog | null>(null);
-  /** Non-null while the check is running: numbers done so far. */
-  const [checking, setChecking] = useState<{ done: number; total: number } | null>(null);
 
   /**
    * A scanned code IS a student code, so it goes straight into the search box -
@@ -304,12 +285,6 @@ export default function StudentsPage() {
       .get<Record<string, boolean>>("/messaging/whatsapp/reachability")
       .then((m) => {
         if (!cancelled) setReach(m);
-      })
-      .catch(() => {});
-    api
-      .get<CheckBacklog>("/messaging/whatsapp/check-numbers/pending")
-      .then((b) => {
-        if (!cancelled) setCheckBacklog(b);
       })
       .catch(() => {});
     return () => {
@@ -677,45 +652,6 @@ export default function StudentsPage() {
     }
   }
 
-  /**
-   * Ask WhatsApp which roster numbers actually exist on it.
-   *
-   * <p>Batched and looped for the same reason the barcode send is: each number
-   * is a round trip to the check service. Stops when a whole batch answers
-   * nothing, so a service that has started refusing does not spin here - the
-   * numbers it could not answer for stay unchecked on purpose rather than being
-   * recorded as having no WhatsApp.
-   */
-  async function checkNumbers() {
-    const total = checkBacklog?.pending ?? 0;
-    let done = 0;
-    setChecking({ done, total });
-    try {
-      for (;;) {
-        const r = await api.post<CheckBatch>("/messaging/whatsapp/check-numbers");
-        if (r.blocked_reason) {
-          toast.error(r.blocked_reason);
-          return;
-        }
-        done += r.checked;
-        setChecking({ done, total });
-        if (r.remaining === 0 || r.checked === 0) {
-          if (r.checked === 0 && r.failed > 0) {
-            toast.error(`تعذّر فحص ${r.failed} رقم — حاول بعد قليل`);
-            return;
-          }
-          break;
-        }
-      }
-      toast.success(done > 0 ? `تم فحص ${done} رقم` : "كل الأرقام مفحوصة بالفعل");
-    } catch (err) {
-      toast.error(err instanceof ApiError ? err.message : "تعذّر فحص الأرقام");
-    } finally {
-      setChecking(null);
-      reload();
-    }
-  }
-
   async function handleDelete(s: Student) {
     const done = (queued: boolean) => {
       invalidate("/students"); // drops every cached page of the list
@@ -979,49 +915,6 @@ export default function StudentsPage() {
               )}
             </div>
           )}
-          {/* Ask WhatsApp which numbers exist on it. Separate from anything that
-              sends: this costs nothing per number in message fees and touches
-              no family, so it is safe to press before the term starts. */}
-          <button
-            type="button"
-            onClick={() => void checkNumbers()}
-            disabled={
-              !!checking ||
-              !online ||
-              !checkBacklog ||
-              checkBacklog.pending === 0 ||
-              !!checkBacklog.blocked_reason
-            }
-            title={
-              !online
-                ? "لا يوجد اتصال بالإنترنت"
-                : !checkBacklog
-                  ? "تعذّر قراءة حالة الفحص — حدّث الصفحة"
-                  : checkBacklog.blocked_reason
-                    ? checkBacklog.blocked_reason
-                    : checkBacklog.pending === 0
-                      ? "كل الأرقام مفحوصة"
-                      : "فحص أرقام الطلاب وأولياء الأمور: هل عليها واتساب؟"
-            }
-            className="order-4 flex h-11 shrink-0 items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 font-medium text-slate-700 shadow-sm transition hover:border-slate-300 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {checking ? (
-              <>
-                <Loader2 className="h-5 w-5 animate-spin text-accent" />
-                <span className="tabular-nums">
-                  {checking.done} / {checking.total}
-                </span>
-              </>
-            ) : (
-              <>
-                <MessageCircle className="h-5 w-5 text-slate-400" />
-                فحص واتساب
-                <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs tabular-nums text-slate-500">
-                  {checkBacklog?.pending ?? "—"}
-                </span>
-              </>
-            )}
-          </button>
           {canCreate && (
             <button
               onClick={() => setAddOpen(true)}
