@@ -4,6 +4,11 @@ import { fmtDateTime } from "@/lib/datetime";
  * A table cell for an audit column: the timestamp on the first line and who did
  * it underneath.
  *
+ * <p>The name stands on its own - no "بواسطة" in front of it. Under a column
+ * headed "الإنشاء" or "آخر تعديل", a date and a person's name can only
+ * mean one thing, and the preposition was a word repeated on every row of every
+ * table to say what the column heading already said.
+ *
  * <p>The name is only worth a line where more than one person could have done
  * it. Omitting the prop entirely drops the line; passing it and finding it empty
  * still prints a dash, because there the blank is meaningful - a row written
@@ -17,7 +22,7 @@ export function AuditCell({ at, by }: { at?: string | null; by?: string | null }
     <div className="leading-tight break-words">
       <div className="text-xs text-slate-500">{fmtDateTime(at)}</div>
       {by !== undefined && (
-        <div className="mt-0.5 text-[11px] text-slate-400">{by ? `بواسطة ${by}` : "—"}</div>
+        <div className="mt-0.5 text-[11px] text-slate-400">{by || "—"}</div>
       )}
     </div>
   );
