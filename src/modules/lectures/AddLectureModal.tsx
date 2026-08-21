@@ -8,7 +8,7 @@ export function AddLectureModal({ onClose }: { onClose: () => void }) {
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
-    cachedGet<Grade[]>("/grades")
+    cachedGet<Grade[]>("/grades/in-use")
       .then(setGrades)
       .finally(() => setReady(true));
   }, []);

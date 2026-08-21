@@ -21,11 +21,11 @@ export interface AdminSummary {
   email: string;
   /** WhatsApp number invoices are sent to; null until it is set. */
   phone: string | null;
+  /** Public contact number message templates print; not the personal one. */
+  office_phone: string | null;
   active: boolean;
   created_at: string;
-  created_by: string | null;
   updated_at: string | null;
-  updated_by: string | null;
   student_count: number;
   assistant_count: number;
   photo: string | null;
@@ -156,8 +156,8 @@ export default function TeachersPage() {
                       <td className="px-5 py-3.5" onClick={(e) => e.stopPropagation()}>
                         <Toggle checked={a.active} onChange={() => toggleActive(a)} disabled={busyId === a.id} />
                       </td>
-                      <td className="px-5 py-3.5"><AuditCell at={a.created_at} by={a.created_by} /></td>
-                      <td className="px-5 py-3.5"><AuditCell at={a.updated_at} by={a.updated_by} /></td>
+                      <td className="px-5 py-3.5"><AuditCell at={a.created_at} /></td>
+                      <td className="px-5 py-3.5"><AuditCell at={a.updated_at} /></td>
                       <td className="px-5 py-3.5" onClick={(e) => e.stopPropagation()}>
                         <div className="flex items-center justify-end gap-1.5">
                           <button
@@ -220,6 +220,7 @@ export function AdminForm({
   const [username, setUsername] = useState(initial?.username ?? "");
   const [loginName, setLoginName] = useState(localPartOf(initial?.email));
   const [phone, setPhone] = useState(initial?.phone ?? "");
+  const [officePhone, setOfficePhone] = useState(initial?.office_phone ?? "");
   const [nameTaken, setNameTaken] = useState(false);
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -237,6 +238,7 @@ export function AdminForm({
           username: username.trim(),
           email: loginName,
           phone: phone.trim(),
+          office_phone: officePhone.trim(),
           ...(password ? { password } : {}),
         });
       } else {
@@ -244,6 +246,7 @@ export function AdminForm({
           username: username.trim(),
           email: loginName,
           phone: phone.trim(),
+          office_phone: officePhone.trim(),
           password,
         });
       }
@@ -320,6 +323,21 @@ export function AdminForm({
             dir="ltr"
             value={phone}
             onChange={(e) => setPhone(e.target.value)}
+            maxLength={20}
+            className={`${inputClass} text-left`}
+          />
+        </Field>
+
+        {/* The number templates print for parents to call. Kept apart from the
+            one above: that one is personal, and a template quoting it would hand
+            it to every parent the system writes to. */}
+        <Field label="رقم مكتب المدرّس" hint="يظهر داخل الرسائل ليتواصل عليه أولياء الأمور">
+          <input
+            type="tel"
+            inputMode="numeric"
+            dir="ltr"
+            value={officePhone}
+            onChange={(e) => setOfficePhone(e.target.value)}
             maxLength={20}
             className={`${inputClass} text-left`}
           />

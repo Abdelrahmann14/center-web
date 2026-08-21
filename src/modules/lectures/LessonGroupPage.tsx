@@ -18,6 +18,7 @@ import { MultiSelectFilter } from "@/components/MultiSelectFilter";
 import { api, ApiError, isOfflineError, qs, type Page } from "@/lib/api";
 import { useCachedGet } from "@/lib/dataCache";
 import { useOnline } from "@/lib/useOnline";
+import { useWhatsappAction } from "@/lib/useWhatsappAvailability";
 import { useSync } from "@/sync/SyncProvider";
 import { LoaderBlock } from "@/components/PencilLoader";
 import { toast } from "@/components/ui/toast";
@@ -440,6 +441,13 @@ export default function LessonGroupPage() {
       ? "تعذّر معرفة من استلم الرسائل"
       : undefined;
 
+  // Each of the three buttons sends a DIFFERENT kind of message, and the three
+  // can be on different numbers - so each asks about its own kind rather than
+  // sharing one "is WhatsApp on?" answer.
+  const waAttendance = useWhatsappAction("attendance");
+  const waAbsence = useWhatsappAction("absence");
+  const waExam = useWhatsappAction("exam_result");
+
   if (loading) return <LoaderBlock />;
 
   return (
@@ -493,16 +501,27 @@ export default function LessonGroupPage() {
                 armed={armed === "attendance"}
                 count={attendanceTargets.length}
                 busy={sending === "attendance"}
-                disabled={sendBlocked || sending !== null}
-                title={sendHint ?? "عرض من ستصلهم رسالة الحضور ثم إرسالها"}
+                disabled={sendBlocked || sending !== null || waAttendance.disabled}
+                title={
+                  sendHint ??
+                  (waAttendance.disabled
+                    ? (waAttendance.reason ?? "إرسال واتساب غير متاح")
+                    : "عرض من ستصلهم رسالة الحضور ثم إرسالها")
+                }
                 onClick={() => armOrSend("attendance")}
                 onCancel={() => setArmed(null)}
               />
               <button
                 type="button"
                 onClick={() => void openAbsentees("send")}
-                disabled={!online || absentBusy}
-                title={online ? "عرض غائبي المجموعة وإرسال رسائل الغياب" : "لا يوجد اتصال بالإنترنت"}
+                disabled={!online || absentBusy || waAbsence.disabled}
+                title={
+                  !online
+                    ? "لا يوجد اتصال بالإنترنت"
+                    : waAbsence.disabled
+                      ? (waAbsence.reason ?? "إرسال واتساب غير متاح")
+                      : "عرض غائبي المجموعة وإرسال رسائل الغياب"
+                }
                 className="flex h-11 shrink-0 items-center gap-2 rounded-xl border border-rose-300 bg-white px-3.5 text-sm font-medium text-rose-600 shadow-sm transition hover:bg-rose-50 disabled:opacity-50"
               >
                 {absentBusy ? (
@@ -519,11 +538,14 @@ export default function LessonGroupPage() {
                 armed={armed === "exam-grade"}
                 count={examTargets.length}
                 busy={sending === "exam-grade"}
-                disabled={sendBlocked || sending !== null || !hasExam}
+                disabled={sendBlocked || sending !== null || !hasExam || waExam.disabled}
                 title={
                   !hasExam
                     ? "هذه الحصة بدون اختبار"
-                    : (sendHint ?? "عرض من ستصلهم درجته ثم إرسالها")
+                    : (sendHint ??
+                      (waExam.disabled
+                        ? (waExam.reason ?? "إرسال واتساب غير متاح")
+                        : "عرض من ستصلهم درجته ثم إرسالها"))
                 }
                 onClick={() => armOrSend("exam-grade")}
                 onCancel={() => setArmed(null)}

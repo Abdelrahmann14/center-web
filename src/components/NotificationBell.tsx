@@ -8,7 +8,6 @@ interface Notif {
   id: string;
   sender: string;
   /** The sender's profile photo (base64 data URL), when they have one. */
-  sender_photo: string | null;
   type: string;
   title: string | null;
   body: string;
@@ -33,7 +32,19 @@ export function NotificationBell() {
   const [open, setOpen] = useState(false);
   const [showAll, setShowAll] = useState(false);
   const [items, setItems] = useState<Notif[] | null>(null);
-  const [pos, setPos] = useState<{ top: number; right: number } | null>(null);
+  /**
+   * Where the panel sits, in viewport coordinates.
+   *
+   * <p>Anchored on ONE edge - `top` when it hangs below the bell, `bottom` when
+   * it has flipped above it - never both, so the panel keeps its natural height
+   * up to `maxHeight` instead of being stretched between two anchors.
+   */
+  const [pos, setPos] = useState<{
+    top?: number;
+    bottom?: number;
+    right: number;
+    maxHeight: number;
+  } | null>(null);
   const btnRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
 
@@ -80,12 +91,50 @@ export function NotificationBell() {
     }
   }
 
+  /**
+   * Place the panel so it always fits on screen.
+   *
+   * <p>It used to be pinned at {@code bell.bottom + 10} with a fixed 24rem list
+   * under it and nothing measuring the viewport, so on a short window - or with
+   * the bell sitting low in the sidebar - the panel simply ran off the bottom of
+   * the screen and the notifications underneath were unreachable: the page
+   * itself does not scroll, and a fixed element cannot be scrolled to.
+   *
+   * <p>So the room below is measured, and the panel is told how tall it may be.
+   * It flips above the bell only when below is genuinely cramped AND above is
+   * roomier - flipping for a few pixels' gain would make the panel jump sides
+   * for no benefit. `right` is clamped so a bell near the screen edge cannot
+   * push the panel off it either.
+   */
+  function place() {
+    if (!btnRef.current) return;
+    const GAP = 10;
+    const MARGIN = 12;
+    const r = btnRef.current.getBoundingClientRect();
+    const below = window.innerHeight - r.bottom - GAP - MARGIN;
+    const above = r.top - GAP - MARGIN;
+    const flip = below < 240 && above > below;
+    setPos({
+      top: flip ? undefined : r.bottom + GAP,
+      bottom: flip ? window.innerHeight - r.top + GAP : undefined,
+      right: Math.max(MARGIN, window.innerWidth - r.right),
+      // Never below a usable height: on a very short window the panel scrolls
+      // internally rather than collapsing to a sliver.
+      maxHeight: Math.max(200, flip ? above : below),
+    });
+  }
+
+  // The bell moves with the layout, so a resized window (or a rotated phone)
+  // would otherwise leave the panel pinned where the bell used to be.
+  useEffect(() => {
+    if (!open) return;
+    window.addEventListener("resize", place);
+    return () => window.removeEventListener("resize", place);
+  }, [open]);
+
   async function toggle() {
     const next = !open;
-    if (next && btnRef.current) {
-      const r = btnRef.current.getBoundingClientRect();
-      setPos({ top: r.bottom + 10, right: window.innerWidth - r.right });
-    }
+    if (next) place();
     setOpen(next);
     if (next) await loadItems();
   }
@@ -116,10 +165,17 @@ export function NotificationBell() {
         createPortal(
           <div
             ref={panelRef}
-            style={{ position: "fixed", top: pos.top, right: pos.right, width: 320 }}
-            className="z-50 overflow-hidden rounded-2xl border border-slate-200 bg-white text-right shadow-2xl"
+            style={{
+              position: "fixed",
+              top: pos.top,
+              bottom: pos.bottom,
+              right: pos.right,
+              width: 320,
+              maxHeight: pos.maxHeight,
+            }}
+            className="z-50 flex flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white text-right shadow-2xl"
           >
-            <div className="flex items-center justify-between border-b border-slate-100 px-4 py-2.5">
+            <div className="flex shrink-0 items-center justify-between border-b border-slate-100 px-4 py-2.5">
               <span className="font-bold text-slate-800">الإشعارات</span>
               <button
                 onClick={openAll}
@@ -128,7 +184,10 @@ export function NotificationBell() {
                 عرض
               </button>
             </div>
-            <div className="max-h-96 overflow-auto">
+            {/* min-h-0 is what lets this shrink inside the flex column - without
+                it the list keeps its content height and pushes the panel past
+                the maxHeight the placement just worked out. */}
+            <div className="min-h-0 flex-1 overflow-auto">
               {items === null ? (
                 <div className="p-6 text-center text-sm text-slate-400">جارٍ التحميل…</div>
               ) : items.length === 0 ? (
@@ -141,7 +200,7 @@ export function NotificationBell() {
                       n.read ? "" : "bg-accent/5"
                     }`}
                   >
-                    <Avatar photo={n.sender_photo} />
+                    <Avatar />
                     <div className="min-w-0 flex-1">
                       {/* Title row: unread dot is pinned opposite the title so a
                           long title truncates instead of shoving it out. */}
@@ -199,7 +258,7 @@ export function NotificationBell() {
                   key={n.id}
                   className="flex items-start gap-3 rounded-xl border border-slate-200 bg-white p-4 text-right"
                 >
-                  <Avatar photo={n.sender_photo} />
+                  <Avatar />
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
                       <span className="font-bold text-slate-800">{n.title || n.sender}</span>
@@ -222,10 +281,10 @@ export function NotificationBell() {
   );
 }
 
-function Avatar({ photo }: { photo: string | null }) {
-  return photo ? (
-    <img src={photo} alt="" className="mt-0.5 h-9 w-9 shrink-0 rounded-full object-cover" />
-  ) : (
+// Every inbox row now comes from the platform itself, so there is no sender
+// account behind it and no photo to show - just the bell mark.
+function Avatar() {
+  return (
     <span className="mt-0.5 grid h-9 w-9 shrink-0 place-items-center rounded-full bg-accent/10 text-accent">
       <BellRing className="h-4 w-4" />
     </span>

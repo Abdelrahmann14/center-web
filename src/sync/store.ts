@@ -253,6 +253,8 @@ export class WebSyncStore implements SyncStore {
     switch (rawPath) {
       case "/grades":
         return this.readGrades();
+      case "/grades/in-use":
+        return this.readGradesInUse();
       case "/groups":
         return getAll<Row>(this.db, STORES.groups);
       case "/lectures":
@@ -631,6 +633,26 @@ export class WebSyncStore implements SyncStore {
         const g = r.grade;
         if (typeof g === "string" && g) seen.add(g);
       }
+    }
+    return [...seen]
+      .sort((a, b) => a.localeCompare(b, "ar"))
+      .map((name) => ({ id: name, name, is_active: true, track_kind: null }));
+  }
+
+  /**
+   * The grades this workspace teaches, offline.
+   *
+   * <p>Online the server answers from the centers' price lists; the mirror has
+   * no centers, so it answers from the groups, which is the same question asked
+   * of the data that is here. School order is lost - the grades' sort order is
+   * not mirrored - so this falls back to alphabetical.
+   */
+  private async readGradesInUse(): Promise<Row[]> {
+    const rows = await getAll<Row>(this.db, STORES.groups);
+    const seen = new Set<string>();
+    for (const r of rows) {
+      const g = r.grade;
+      if (typeof g === "string" && g) seen.add(g);
     }
     return [...seen]
       .sort((a, b) => a.localeCompare(b, "ar"))
@@ -1096,7 +1118,7 @@ export class WebSyncStore implements SyncStore {
    * and the outbox is how a request survives having nowhere to go yet. On
    * reconnect it replays as a `whatsapp_send` mutation, the server hands it to
    * its own outbox, and the send happens there - so "the browser is back" and
-   * "Green API is reachable" stay two separate questions, each answered by
+   * "WhatsApp is reachable" stay two separate questions, each answered by
    * whoever can actually answer it.
    *
    * <p>It cannot double-send: the sync ledger drops a re-delivered mutation, and

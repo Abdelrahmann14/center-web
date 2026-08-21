@@ -10,13 +10,13 @@ import {
   ChartColumn,
   CalendarRange,
   UserCog,
-  Megaphone,
   Plug,
   Menu,
 } from "@/components/icons";
 import { useAuth } from "@/auth/AuthContext";
 import sidebarLogo from "@/assets/sidebar-logo.png";
 import { AccountRow } from "@/components/AccountRow";
+import { NotificationBell } from "@/components/NotificationBell";
 import { ConfirmDialog } from "@/components/ui";
 import { PAGE_FRAME_ID } from "@/components/PencilLoader";
 import { getScroll, saveScroll } from "@/lib/pageState";
@@ -75,8 +75,6 @@ const NAV: NavItem[] = [
   // used on the home page for today alone.
   { to: "/grades", label: "المجموعات والسناتر", icon: <CalendarRange className="h-5 w-5" />, adminOnly: true, module: "GROUPS" },
   { to: "/users", label: "المساعدون", icon: <UserCog className="h-5 w-5" />, adminOnly: true, module: "ASSISTANTS" },
-  // WhatsApp messaging: manual sends, the automated messages, and their log.
-  { to: "/notifications", label: "الرسائل", icon: <Megaphone className="h-5 w-5" />, perm: ["NOTIFICATION_SEND"] },
   // Connections to the outside. Blocks read as "modules", which these are not.
   { to: "/services", label: "الخدمات", icon: <Plug className="h-5 w-5" />, adminOnly: true },
 ];
@@ -226,6 +224,10 @@ export default function DashboardLayout() {
           {/* Offline sync state: quiet when synced, speaks up when offline or
               while writes are still queued. */}
           <SyncStatusPill />
+          {/* The inbox. It carries what the platform has to tell this workspace -
+              a WhatsApp number that dropped and what took over its messages -
+              which is exactly the kind of thing nobody goes looking for. */}
+          <NotificationBell />
           {/* Who is signed in, with sign-out right next to them. */}
           <AccountRow onLogout={() => setConfirmLogout(true)} />
         </div>

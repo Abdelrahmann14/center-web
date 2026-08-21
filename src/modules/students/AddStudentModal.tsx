@@ -12,7 +12,7 @@ export function AddStudentModal({ onClose }: { onClose: () => void }) {
 
   useEffect(() => {
     Promise.all([
-      cachedGet<Grade[]>("/grades"),
+      cachedGet<Grade[]>("/grades/in-use"),
       cachedGet<Group[]>("/groups"),
       cachedGet<StudentOptions>("/students/options"),
     ])

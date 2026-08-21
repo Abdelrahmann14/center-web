@@ -1,20 +1,80 @@
 import { useEffect, useState } from "react";
-import { Plus, Loader2, X, Check, AlertTriangle } from "@/components/icons";
+import { Plus, Loader2, X, Barcode } from "@/components/icons";
 import { api, ApiError, isOfflineError, qs } from "@/lib/api";
+import { cachedGet, setCache } from "@/lib/dataCache";
 import { dayLabel } from "@/lib/days";
 import { fmtTime } from "@/lib/datetime";
 import { useDebounced } from "@/lib/useDebounced";
 import { useOnline } from "@/lib/useOnline";
 import { useSync } from "@/sync/SyncProvider";
-import { useWhatsappCheck, type WaStatus } from "@/lib/useWhatsappCheck";
 import { NAME_MIN_PARTS, nameParts, isFullName } from "@/lib/studentName";
 import { RELIGIONS, GENDERS, type TrackKind } from "@/lib/tracks";
 import { Modal, Field, Select, FieldError, FormNotice, AutocompleteInput, advanceOnEnter, inputClass } from "@/components/ui";
 import { useToast } from "@/components/Toast";
+import { Toggle } from "@/components/Toggle";
 
 export const MAX_PHONES = 3;
 export const MIN_DIGITS = 11;
 export const digitsOnly = (p: string) => p.replace(/\D/g, "");
+
+/** Read by the form and warmed by the students page - one path, spelt once. */
+export const AUTO_BARCODE_PATH = "/students/barcode/auto";
+
+/**
+ * The "send the card automatically" switch, read from and written to the server.
+ *
+ * <p>It is a setting on THIS ACCOUNT, not a field on the student being entered:
+ * flipping it governs every student this user adds afterwards, and nobody
+ * else's - the teacher and each of their assistants carry their own answer. That
+ * is why the label beside it says so; a switch inside a create form reads as
+ * being about this one record unless it is told otherwise.
+ *
+ * <p>Written optimistically, and put back if the server refuses: the switch is
+ * the whole feedback for a one-bit setting, so it must never sit in a position
+ * the server did not accept.
+ */
+function useAutoBarcode(isEdit: boolean) {
+  const [on, setOn] = useState<boolean | null>(null);
+  const [saving, setSaving] = useState(false);
+  const toast = useToast();
+
+  useEffect(() => {
+    // Only the add form asks: editing a student never re-sends the welcome.
+    if (isEdit) return;
+    let cancelled = false;
+    // Through the cache, so this costs a round trip once per session instead of
+    // once per time the form is opened. The students page warms it on mount, so
+    // by the time anyone presses "add" the answer is already here and the switch
+    // is drawn with the first frame rather than appearing a moment later.
+    cachedGet<{ enabled: boolean }>(AUTO_BARCODE_PATH)
+      .then((r) => !cancelled && setOn(r.enabled))
+      // Left null, which renders nothing. A switch drawn in a guessed position
+      // would be worse than no switch: it would assert a setting it never read.
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [isEdit]);
+
+  async function set(next: boolean) {
+    const before = on;
+    setOn(next);
+    setSaving(true);
+    try {
+      await api.put(AUTO_BARCODE_PATH, { enabled: next });
+      // Keep the cache honest, so reopening the form does not briefly show the
+      // position this press just replaced.
+      setCache(AUTO_BARCODE_PATH, { enabled: next });
+    } catch (err) {
+      setOn(before);
+      toast(err instanceof ApiError ? err.message : "تعذّر حفظ الإعداد", "error");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return { on, saving, set };
+}
 
 // Name: Arabic letters + single internal spaces only.
 const sanitizeName = (v: string) =>
@@ -59,8 +119,9 @@ export interface Student {
   is_active: boolean;
   /** Why the student is blocked; null while they are active. */
   block_reason: string | null;
-  registered: boolean;
   google_synced: boolean;
+  /** When the barcode card first reached them; null = they never got one. */
+  barcode_sent_at: string | null;
   created_at: string;
   created_by: string | null;
   updated_at: string;
@@ -70,38 +131,11 @@ export interface Student {
 export const groupLabel = (g: Group) =>
   `${dayLabel(g.day_of_week)} · ${fmtTime(g.start_time)} · ${g.center_name}`;
 
-function WhatsappTag({ status }: { status?: WaStatus }) {
-  if (!status || status === "unknown") return null;
-  if (status === "checking") {
-    return (
-      <span className="mt-1 inline-flex items-center gap-1 text-xs text-slate-400">
-        <Loader2 className="h-3.5 w-3.5 animate-spin" />
-        جارٍ التحقق من واتساب…
-      </span>
-    );
-  }
-  if (status === "yes") {
-    return (
-      <span className="mt-1 inline-flex items-center gap-1 rounded-md bg-green-50 px-2 py-0.5 text-xs font-medium text-green-700">
-        <Check className="h-3.5 w-3.5" />
-        مسجل على الواتساب
-      </span>
-    );
-  }
-  return (
-    <span className="mt-1 inline-flex items-center gap-1 rounded-md bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-700">
-      <AlertTriangle className="h-3.5 w-3.5" />
-      غير مسجل على الواتساب
-    </span>
-  );
-}
-
 function PhoneList({
   label,
   phones,
   setPhones,
   errors,
-  statuses,
   incomplete = false,
   onFocus,
   onBlur,
@@ -110,7 +144,6 @@ function PhoneList({
   phones: string[];
   setPhones: (p: string[]) => void;
   errors: (string | null)[];
-  statuses?: (WaStatus | undefined)[];
   /** Amber-marks empty numbers as a still-missing required field. */
   incomplete?: boolean;
   onFocus?: () => void;
@@ -147,7 +180,6 @@ function PhoneList({
                   required={i === 0}
                   className={`${inputClass} ${errors[i] ? "border-rose-400 focus:border-rose-400 focus:ring-rose-200" : ""}`}
                 />
-                <WhatsappTag status={statuses?.[i]} />
               </Field>
               {phones.length > 1 && (
                 <button
@@ -206,6 +238,7 @@ export function StudentForm({
 }) {
   const isEdit = initial !== undefined;
   const toast = useToast();
+  const autoBarcode = useAutoBarcode(isEdit);
   const sync = useSync();
   const online = useOnline();
   const activeGrades = grades.filter((g) => g.is_active || g.name === initial?.grade);
@@ -238,12 +271,6 @@ export function StudentForm({
   const [touched, setTouched] = useState<Record<string, boolean>>({});
   const [allowDup, setAllowDup] = useState(false);
 
-  // WhatsApp lookup per number - informational only. Every number shows an
-  // indicator (on/off WhatsApp), but being off WhatsApp never blocks saving.
-  const studentWa = useWhatsappCheck(studentPhones);
-  const parentWa = useWhatsappCheck(parentPhones);
-  const studentWaStatuses = studentPhones.map((p) => studentWa[digitsOnly(p)]);
-  const parentWaStatuses = parentPhones.map((p) => parentWa[digitsOnly(p)]);
 
   // Two kinds of error, revealed at different moments.
   //
@@ -483,7 +510,6 @@ export function StudentForm({
       notes: payload.notes,
       is_active: active,
       block_reason: payload.block_reason,
-      registered: initial?.registered ?? false,
       google_synced: initial?.google_synced ?? false,
       created_at: initial?.created_at ?? now,
       created_by: initial?.created_by ?? null,
@@ -558,6 +584,27 @@ export function StudentForm({
           <span className="font-ledger rounded-lg border border-dark/15 bg-dark/8 px-2.5 py-1 text-sm font-semibold text-dark/75">
             {displaySerial}
           </span>
+          {/* Beside the code because the code is what the card carries. Absent
+              entirely while the setting is unknown - see useAutoBarcode. */}
+          {autoBarcode.on !== null && (
+            <span
+              className="flex items-center gap-1.5"
+              title={
+                autoBarcode.on
+                  ? "إرسال الباركود تلقائياً: كل طالب تضيفه أنت سيصله كارت الباركود على واتساب فور حفظه. الإعداد يخصّ حسابك وحده."
+                  : "إرسال الباركود تلقائياً: مُغلق. لن يُرسل باركود عند إضافتك لطالب — أرسله لاحقاً من زر «إرسال الباركود». الإعداد يخصّ حسابك وحده."
+              }
+            >
+              <Barcode
+                className={`h-4 w-4 shrink-0 ${autoBarcode.on ? "text-accent" : "text-slate-400"}`}
+              />
+              <Toggle
+                checked={autoBarcode.on}
+                disabled={autoBarcode.saving}
+                onChange={(next) => void autoBarcode.set(next)}
+              />
+            </span>
+          )}
         </span>
       }
       onClose={onClose}
@@ -684,7 +731,7 @@ export function StudentForm({
         <Field
           label="سعر الحصة"
           filled={price !== ""}
-          hint={centerPrice != null ? `سعر السنتر: ${centerPrice} ج.م` : "اختر المجموعة أولاً"}
+          hint={centerPrice != null ? `سعر السنتر: ${centerPrice}` : "اختر المجموعة أولاً"}
         >
           <FieldError message={priceError} />
           <input
@@ -733,7 +780,6 @@ export function StudentForm({
             phones={studentPhones}
             setPhones={setStudentPhones}
             errors={studentPhoneErrors}
-            statuses={studentWaStatuses}
             incomplete={sPhonesIncomplete}
             onBlur={(i) => touch(`sphone${i}`)}
           />
@@ -759,7 +805,6 @@ export function StudentForm({
             phones={parentPhones}
             setPhones={setParentPhones}
             errors={parentPhoneErrors}
-            statuses={parentWaStatuses}
             incomplete={pPhonesIncomplete}
             onBlur={(i) => touch(`pphone${i}`)}
           />

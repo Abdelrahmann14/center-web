@@ -15,11 +15,13 @@ interface Grade {
   name: string;
   is_active: boolean;
   track_kind: string;
+  /** Where the grade sits in the school year; the list comes back sorted by it. */
+  sort_order: number;
   created_at: string;
-  created_by: string | null;
   updated_at: string | null;
-  updated_by: string | null;
 }
+
+const arNum = (n: number) => n.toLocaleString("ar-EG");
 
 const TRACK_KIND_OPTIONS = [
   { value: "none", label: "بدون شعب" },
@@ -35,9 +37,16 @@ export default function GradesAdminPage() {
   const [confirmDelete, setConfirmDelete] = useState<Grade | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [q, setQ] = useState("");
+  // Grade name -> how many students are in it, across every workspace. Kept off
+  // /grades because that list feeds every teacher's selects too.
+  const [counts, setCounts] = useState<Record<string, number>>({});
 
   function load() {
     api.get<Grade[]>("/grades").then(setRows).catch(() => setRows([]));
+    api
+      .get<Record<string, number>>("/grades/student-counts")
+      .then(setCounts)
+      .catch(() => setCounts({}));
   }
   useEffect(load, []);
 
@@ -85,10 +94,7 @@ export default function GradesAdminPage() {
 
   return (
     <div>
-      <div className="flex items-center justify-between gap-4">
-        <div className="flex items-center gap-2">
-          <GraduationCap className="h-6 w-6 text-accent" />
-        </div>
+      <div className="flex items-center justify-end gap-4">
         <button
           onClick={() => setCreating(true)}
           className="flex items-center gap-2 rounded-xl bg-accent px-4 py-2.5 font-medium text-white transition hover:bg-accent-hover"
@@ -97,10 +103,6 @@ export default function GradesAdminPage() {
           صف جديد
         </button>
       </div>
-
-      <p className="mt-2 max-w-2xl text-sm text-slate-500">
-        القائمة العامة للصفوف على مستوى النظام. كل المدرّسين يستخدمون هذه القائمة، ولا يمكنهم تعديلها.
-      </p>
 
       <FilterBar
         rows={searched}
@@ -114,7 +116,9 @@ export default function GradesAdminPage() {
             <table className="w-full text-right text-sm">
               <thead className={THEAD}>
                 <tr>
+                  <th className="px-5 py-3 font-medium">الترتيب</th>
                   <th className="px-5 py-3 font-medium">اسم الصف</th>
+                  <th className="px-5 py-3 font-medium">الطلاب</th>
                   <th className="px-5 py-3 font-medium">الشعب</th>
                   <th className="px-5 py-3 font-medium">مُفعّل</th>
                   <th className="px-5 py-3 font-medium">تاريخ الإنشاء</th>
@@ -125,13 +129,19 @@ export default function GradesAdminPage() {
               <tbody className="divide-y divide-slate-100">
                 {visibleRows.map((g) => (
                   <tr key={g.id} className={g.is_active ? "" : "bg-slate-50/60"}>
+                    <td className="px-5 py-3.5 text-slate-400">{arNum(g.sort_order)}</td>
                     <td className="px-5 py-3.5 font-medium text-slate-800">{g.name}</td>
+                    <td className="px-5 py-3.5">
+                      <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-600">
+                        {arNum(counts[g.name] ?? 0)}
+                      </span>
+                    </td>
                     <td className="px-5 py-3.5 text-slate-600">{trackKindLabel(g.track_kind)}</td>
                     <td className="px-5 py-3.5">
                       <Toggle checked={g.is_active} onChange={() => toggleActive(g)} disabled={busy === g.id} />
                     </td>
-                    <td className="px-5 py-3.5"><AuditCell at={g.created_at} by={g.created_by} /></td>
-                    <td className="px-5 py-3.5"><AuditCell at={g.updated_at} by={g.updated_by} /></td>
+                    <td className="px-5 py-3.5"><AuditCell at={g.created_at} /></td>
+                    <td className="px-5 py-3.5"><AuditCell at={g.updated_at} /></td>
                     <td className="px-5 py-3.5">
                       <div className="flex items-center justify-end gap-1.5">
                         <button onClick={() => setEdit(g)} className="rounded-lg p-1.5 text-slate-400 transition hover:bg-accent/10 hover:text-accent">
@@ -144,7 +154,7 @@ export default function GradesAdminPage() {
                 ))}
                 {visibleRows.length === 0 && (
                   <tr>
-                    <td colSpan={6} className="px-5 py-10 text-center text-slate-400">
+                    <td colSpan={8} className="px-5 py-10 text-center text-slate-400">
                       <GraduationCap className="mx-auto mb-2 h-10 w-10 text-slate-300" />
                       {rows.length === 0 ? "لا توجد صفوف بعد" : "لا توجد نتائج"}
                     </td>
@@ -188,6 +198,7 @@ function GradeForm({ grade, onClose, onSaved }: { grade: Grade | null; onClose: 
   const isEdit = grade !== null;
   const [name, setName] = useState(grade?.name ?? "");
   const [kind, setKind] = useState<string>(grade?.track_kind ?? "none");
+  const [order, setOrder] = useState(String(grade?.sort_order ?? 100));
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
 
@@ -197,7 +208,12 @@ function GradeForm({ grade, onClose, onSaved }: { grade: Grade | null; onClose: 
     if (!name.trim()) return setError("أدخل اسم الصف");
     setSaving(true);
     try {
-      const payload = { name: name.trim(), track_kind: kind, is_active: grade?.is_active ?? true };
+      const payload = {
+        name: name.trim(),
+        track_kind: kind,
+        is_active: grade?.is_active ?? true,
+        sort_order: Number(order) || 100,
+      };
       if (isEdit) {
         await api.put(`/grades/${grade.id}`, payload);
       } else {
@@ -231,11 +247,20 @@ function GradeForm({ grade, onClose, onSaved }: { grade: Grade | null; onClose: 
       }
     >
       <form id="grade-admin-form" onSubmit={submit} className="space-y-4">
-        <Field label="اسم الصف" hint="مثال: الصف الأول الثانوي">
+        <Field label="اسم الصف">
           <input value={name} onChange={(e) => setName(e.target.value)} required {...requiredArabic} autoFocus className={inputClass} />
         </Field>
-        <Field label="الشعب" hint="تحدد خيارات الشعبة عند إضافة الطالب">
+        <Field label="الشعب">
           <Select value={kind} onChange={setKind} options={TRACK_KIND_OPTIONS} />
+        </Field>
+        <Field label="الترتيب" hint="الأصغر يظهر أولاً">
+          <input
+            value={order}
+            onChange={(e) => setOrder(e.target.value.replace(/\D/g, "").slice(0, 4))}
+            dir="ltr"
+            inputMode="numeric"
+            className={inputClass}
+          />
         </Field>
         <FormNotice message={error} />
       </form>

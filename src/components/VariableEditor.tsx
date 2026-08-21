@@ -252,7 +252,6 @@ export function VariableEditor({
   placeholder,
   disabled,
   maxLength = 2000,
-  leading,
   fieldTint,
   onCommit,
 }: {
@@ -269,12 +268,6 @@ export function VariableEditor({
    * from what you wrote is.
    */
   onCommit?: () => void;
-  /**
-   * Controls that belong to this field and share its one chrome line - the
-   * field's own settings sit at the start of the row, the writing tools at the
-   * end, and nothing costs a second line.
-   */
-  leading?: React.ReactNode;
   /** Background class for the writing surface itself (defaults to white). */
   fieldTint?: string;
 }) {
@@ -563,10 +556,9 @@ export function VariableEditor({
     if (text) insertNodes([document.createTextNode(text)]);
   }
 
-  // One line of chrome: the field's own settings first, the writing tools last.
+  // One line of chrome, holding the writing tools.
   const tools = (
     <div className="mb-1.5 flex flex-wrap items-center gap-2">
-        {leading}
         <div className="ms-auto flex items-center gap-1.5">
         <button
           type="button"

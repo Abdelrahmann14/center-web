@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
-import { LogOut, Users2, BellRing, BookOpen, ShieldCheck } from "@/components/icons";
+import { LogOut, Users2, BookOpen, MessageCircle } from "@/components/icons";
 import { useAuth } from "@/auth/AuthContext";
 import { ConfirmDialog } from "@/components/ui";
 import { PAGE_FRAME_ID } from "@/components/PencilLoader";
@@ -8,14 +8,17 @@ import { toast } from "@/components/ui/toast";
 
 /**
  * The super admin's platform console. No sidebar and no workspace browsing: a top
- * bar (logout at the top-right) over a tab strip - Teachers, Students, Parents,
- * and System Notifications.
+ * bar (logout at the top-right) over a tab strip.
+ *
+ * <p>The console operates the platform; it does not use it. There is no screen
+ * here for sending a message to anyone - messaging belongs to a teacher's own
+ * workspace, under that teacher's own number. What the super admin keeps is the
+ * WhatsApp account itself: which numbers exist and which templates are approved.
  */
 const TABS = [
   { to: "/users", label: "المستخدمون", icon: Users2 },
   { to: "/grades", label: "الصفوف", icon: BookOpen },
-  { to: "/notifications", label: "الإشعارات والمراسلات", icon: BellRing },
-  { to: "/services", label: "الخدمات", icon: ShieldCheck },
+  { to: "/whatsapp", label: "واتساب", icon: MessageCircle },
 ];
 
 export default function SuperAdminLayout() {

@@ -2,26 +2,24 @@ import { type ReactNode } from "react";
 import { AlertTriangle, Ban, Coins } from "@/components/icons";
 import { Modal } from "@/components/ui";
 import { AuditCell } from "@/components/AuditCell";
+import { fmtDate } from "@/lib/datetime";
 import { groupLabel, type Student, type Group, type Grade } from "./StudentForm";
 import { missingStudentFields, STUDENT_FIELD_LABEL } from "./incompleteFields";
 
 /**
  * Read-only view of every field a student carries - including the ones the table
- * no longer shows (app registration, Google sync, city, religion, track, notes,
+ * no longer shows (Google sync, city, religion, track, notes,
  * discount reason). Opened by clicking a row in the students table.
  */
 export function StudentDetails({
   student,
   groups,
   grades,
-  hasMobileApp,
   onClose,
 }: {
   student: Student;
   groups: Group[];
   grades: Grade[];
-  /** The app column only means something for a workspace with the mobile app. */
-  hasMobileApp: boolean;
   onClose: () => void;
 }) {
   const group = student.group_id ? groups.find((g) => g.id === student.group_id) : undefined;
@@ -109,17 +107,22 @@ export function StudentDetails({
           <Info label="سبب الحظر" value={student.block_reason} className="col-span-2" />
         )}
 
-        {hasMobileApp && (
-          <Info
-            label="التطبيق"
-            value={
-              <Badge on={student.registered} onLabel="مُسجَّل" offLabel="غير مُسجَّل" />
-            }
-          />
-        )}
         <Info
           label="مزامنة Google"
           value={<Badge on={student.google_synced} onLabel="مُزامَن" offLabel="غير مُزامَن" />}
+        />
+
+        {/* The date, not just a yes: "sent" is only reassuring if it was sent
+            recently enough to be the card the student is actually carrying. */}
+        <Info
+          label="كارت الباركود"
+          value={
+            <Badge
+              on={!!student.barcode_sent_at}
+              onLabel={`أُرسل في ${fmtDate(student.barcode_sent_at)}`}
+              offLabel="لم يُرسل"
+            />
+          }
         />
 
         <Info label="ملاحظات" value={student.notes} className="col-span-2 sm:col-span-3" />

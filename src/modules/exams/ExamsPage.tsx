@@ -48,7 +48,7 @@ export default function ExamsPage() {
   const [deleting, setDeleting] = useState<Exam | null>(null);
 
   useEffect(() => {
-    cachedGet<Grade[]>("/grades").then(setGrades).catch(() => {});
+    cachedGet<Grade[]>("/grades/in-use").then(setGrades).catch(() => {});
     cachedGet<Group[]>("/groups").then(setGroups).catch(() => {});
     cachedGet<{ content: LectureLite[] }>("/lectures?size=2000&sort=createdAt,desc")
       .then((p) => setLectures(p.content))

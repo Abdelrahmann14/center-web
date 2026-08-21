@@ -34,11 +34,20 @@ export function fmtTime(time?: string | null, fallback = "-"): string {
 
   const period = hour < 12 ? "ص" : "م";
   const twelve = hour % 12 === 0 ? 12 : hour % 12;
-  const digits = (n: number, pad = false) =>
-    (pad ? String(n).padStart(2, "0") : String(n)).replace(/\d/g, (d) =>
-      String.fromCharCode(0x0660 + Number(d))
-    );
   return minute === 0
-    ? `${digits(twelve)} ${period}`
-    : `${digits(twelve)}:${digits(minute, true)} ${period}`;
+    ? `${arabicDigits(twelve)} ${period}`
+    : `${arabicDigits(twelve)}:${arabicDigits(minute, true)} ${period}`;
+}
+
+/**
+ * Western digits as Arabic-Indic ones (٠-٩), optionally padded to two.
+ *
+ * <p>Its own export because the time PICKER needs the same digits the time
+ * DISPLAY uses - a menu offering "5" beside a table reading "٥" would be the
+ * same clock written two ways on one screen.
+ */
+export function arabicDigits(n: number, pad = false): string {
+  return (pad ? String(n).padStart(2, "0") : String(n)).replace(/\d/g, (d) =>
+    String.fromCharCode(0x0660 + Number(d)),
+  );
 }

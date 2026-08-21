@@ -19,6 +19,7 @@ import { LoaderBlock } from "@/components/PencilLoader";
 import { THEAD } from "@/components/tableStyles";
 import { useAuth } from "@/auth/AuthContext";
 import { useOnline } from "@/lib/useOnline";
+import { useWhatsappAction } from "@/lib/useWhatsappAvailability";
 import { homeworkLabel } from "@/lib/homework";
 
 interface Summary {
@@ -326,6 +327,9 @@ function ExportDialog({
   const { can } = useAuth();
   const canSend = can("STUDENT_REPORT_SEND");
   const online = useOnline();
+  // The report leaves as a PDF over WhatsApp; the server decides whether that is
+  // possible right now, including whether the official template can carry a file.
+  const waReport = useWhatsappAction("report");
 
   async function download() {
     setBusy("download");
@@ -389,11 +393,15 @@ function ExportDialog({
             hint={
               !online
                 ? "لا يوجد اتصال بالإنترنت"
-                : hasParentPhone
-                  ? "عبر واتساب"
-                  : "لا يوجد رقم هاتف لولي الأمر"
+                : waReport.disabled
+                  ? (waReport.reason ?? "إرسال واتساب غير متاح")
+                  : hasParentPhone
+                    ? waReport.numberLabel
+                      ? `عبر واتساب — ${waReport.numberLabel}`
+                      : "عبر واتساب"
+                    : "لا يوجد رقم هاتف لولي الأمر"
             }
-            disabled={!hasParentPhone || !online}
+            disabled={!hasParentPhone || !online || waReport.disabled}
             busy={busy === "parent"}
             onClick={sendToParent}
           />

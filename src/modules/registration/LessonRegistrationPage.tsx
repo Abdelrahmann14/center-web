@@ -23,6 +23,7 @@ import { THEAD } from "@/components/tableStyles";
 import { api, ApiError, isOfflineError, qs, type Page } from "@/lib/api";
 import { useSync } from "@/sync/SyncProvider";
 import { useOnline } from "@/lib/useOnline";
+import { useWhatsappAction } from "@/lib/useWhatsappAvailability";
 import { useBarcodeScanner } from "@/lib/useBarcodeScanner";
 import { CameraScanner, cameraScanSupported } from "@/components/CameraScanner";
 import { searchMode } from "@/lib/studentSearch";
@@ -109,8 +110,11 @@ export default function LessonRegistrationPage() {
   const { can } = useAuth();
   const sync = useSync();
   const online = useOnline();
+  // Auto-sending on registration is an attendance message, and the server is the
+  // one that knows whether that particular type can go out right now.
+  const waAttendance = useWhatsappAction("attendance");
 
-  const gradesQ = useCachedGet<Grade[]>("/grades");
+  const gradesQ = useCachedGet<Grade[]>("/grades/in-use");
   const groupsQ = useCachedGet<Group[]>("/groups");
   // The full student form (opened by the edit button) needs the school/city
   // suggestions and next serial. Not part of `loading` - the page shows without
@@ -146,9 +150,9 @@ export default function LessonRegistrationPage() {
   // Set when the picked student already attended this lesson in another group,
   // and the user has to confirm a repeat attendance before it is added here.
   const [confirmRepeat, setConfirmRepeat] = useState(false);
-  // Set when auto-send is on but the parent's number is not on WhatsApp (or the
-  // student has none): the user is warned before the attendance is committed.
-  const [waWarn, setWaWarn] = useState<{ status: string; detail: string | null } | null>(null);
+  // Set when auto-send is on but the student has no guardian number: the user is
+  // warned before the attendance is committed, since nothing would be sent.
+  const [waWarn, setWaWarn] = useState(false);
 
   const [gradeLectures, setGradeLectures] = useState<Lecture[]>([]);
   const [matches, setMatches] = useState<Student[]>([]);
@@ -449,35 +453,13 @@ export default function LessonRegistrationPage() {
 
   async function registerSelected() {
     if (!selected || registering || !lessonReady) return;
-    // Auto-send on: the attendance message must reach the parent, so verify the
-    // number is on WhatsApp BEFORE committing. Not on WhatsApp / no number ->
-    // warn and let the user decide; could-not-verify (offline / API down) ->
-    // attend anyway and say why, so a service outage never blocks attendance.
-    // Offline the parent-WhatsApp check cannot run (and nothing is sent anyway),
-    // so skip it and let the attendance queue straight away.
-    if (autoAttendance && canSend && online) {
-      setRegistering(true);
-      let status = "UNKNOWN";
-      let detail: string | null = null;
-      try {
-        const res = await api.get<{ status: string; detail: string | null }>(
-          `/messaging/whatsapp/students/${selected.id}/parent-whatsapp`
-        );
-        status = res.status;
-        detail = res.detail;
-      } catch (err) {
-        status = "UNKNOWN";
-        detail = err instanceof ApiError ? err.message : "تعذّر الاتصال للتحقق من واتساب";
-      } finally {
-        setRegistering(false);
-      }
-      if (status === "OFF" || status === "NO_PHONE") {
-        setWaWarn({ status, detail });
-        return;
-      }
-      if (status === "UNKNOWN") {
-        toast(detail ?? "تعذّر التحقق من واتساب", "error");
-      }
+    // Auto-send on: the attendance message goes to the guardian, so a student
+    // with no guardian number would be attended with nothing sent and nobody
+    // told. Warned here, from the record already on screen - no round trip, and
+    // it works offline, where the attendance queues and the message follows.
+    if (autoAttendance && canSend && !selected.parent_phones.some((p) => p.trim())) {
+      setWaWarn(true);
+      return;
     }
     await doRegister();
   }
@@ -729,9 +711,11 @@ export default function LessonRegistrationPage() {
             {canSend && (
               <label
                 title={
-                  online
-                    ? "إرسال رسالة الحضور تلقائيًا إلى واتساب ولي الأمر فور تسجيل الحضور"
-                    : "إرسال واتساب غير متاح دون اتصال بالإنترنت"
+                  !online
+                    ? "إرسال واتساب غير متاح دون اتصال بالإنترنت"
+                    : waAttendance.disabled
+                      ? (waAttendance.reason ?? "إرسال واتساب غير متاح")
+                      : "إرسال رسالة الحضور تلقائيًا إلى واتساب ولي الأمر فور تسجيل الحضور"
                 }
                 className="flex shrink-0 items-center gap-2"
               >
@@ -739,10 +723,16 @@ export default function LessonRegistrationPage() {
                 {/* Sending needs the network, so the auto-send switch is locked
                     off-line - attendance itself still queues and syncs later. */}
                 <Toggle
-                  checked={autoAttendance && online}
+                  checked={autoAttendance && online && !waAttendance.disabled}
                   onChange={toggleAutoAttendance}
-                  disabled={!online}
-                  title={online ? undefined : "لا يوجد اتصال بالإنترنت"}
+                  disabled={!online || waAttendance.disabled}
+                  title={
+                    !online
+                      ? "لا يوجد اتصال بالإنترنت"
+                      : waAttendance.disabled
+                        ? (waAttendance.reason ?? "إرسال واتساب غير متاح")
+                        : undefined
+                  }
                 />
               </label>
             )}
@@ -845,22 +835,18 @@ export default function LessonRegistrationPage() {
         />
       )}
 
-      {/* Auto-send is on but the attendance message cannot reach the parent -
-          confirm attending without it, or cancel to fix the number first. */}
+      {/* Auto-send is on but the attendance message has nowhere to go -
+          confirm attending without it, or cancel to add the number first. */}
       {waWarn && selected && (
         <ConfirmDialog
-          title={waWarn.status === "NO_PHONE" ? "لا يوجد رقم لولي الأمر" : "ولي الأمر ليس على واتساب"}
-          message={
-            waWarn.status === "NO_PHONE"
-              ? `لا يوجد رقم مسجّل لولي أمر "${selected.name}"، لن تصله رسالة الحضور. هل تريد تحضيره بدون إرسال؟`
-              : `رقم ولي أمر "${selected.name}" غير مسجّل على واتساب، لن تصله رسالة الحضور. هل تريد تحضيره بدون إرسال؟`
-          }
+          title="لا يوجد رقم لولي الأمر"
+          message={`لا يوجد رقم مسجّل لولي أمر "${selected.name}"، لن تصله رسالة الحضور. هل تريد تحضيره بدون إرسال؟`}
           confirmLabel="تحضير بدون إرسال"
           onConfirm={() => {
-            setWaWarn(null);
+            setWaWarn(false);
             void doRegister();
           }}
-          onClose={() => setWaWarn(null)}
+          onClose={() => setWaWarn(false)}
         />
       )}
 

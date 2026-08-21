@@ -66,7 +66,7 @@ export default function LecturesPage() {
   const debouncedSearch = useDebounced(search);
 
   useEffect(() => {
-    cachedGet<Grade[]>("/grades").then(setGrades).catch(() => {});
+    cachedGet<Grade[]>("/grades/in-use").then(setGrades).catch(() => {});
   }, []);
 
   // The search hits the server; the chip filters run over the whole result set

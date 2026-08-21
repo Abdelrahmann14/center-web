@@ -80,12 +80,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   async function login(email: string, password: string) {
     const res = await api.post<LoginResponse>("/auth/login", { email, password });
-    // The desktop app is for admins and their assistants only - students use the
-    // mobile app. Reject a student sign-in here rather than show an empty shell.
-    if (res.user.role === "student") {
-      setToken(null);
-      throw new Error("هذا التطبيق مخصص للمدرسين والمساعدين فقط. الطلاب يستخدمون تطبيق الهاتف.");
-    }
     setToken(res.token);
     localStorage.setItem(TOKEN_KEY, res.token);
     remember(res.user);

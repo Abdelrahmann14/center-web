@@ -1,5 +1,6 @@
 import { ClipboardCheck, Loader2, Pencil, Plus, Send, Trash2 } from "@/components/icons";
 import type { FinanceEntry, Invoice } from "./types";
+import { useWhatsappAction } from "@/lib/useWhatsappAvailability";
 
 /**
  * A lesson session drawn as the thing it replaces: the carbon-copy receipt the
@@ -47,6 +48,9 @@ export function InvoiceCard({
   onSend: () => void;
 }) {
   const date = new Date(`${invoice.session_date}T00:00:00`);
+  // The invoice PDF leaves over WhatsApp like any other document, so the same
+  // backend answer decides whether the button can be offered.
+  const wa = useWhatsappAction("broadcast");
 
   return (
     <article className="relative flex w-[23rem] shrink-0 snap-start flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm transition hover:shadow-md">
@@ -183,8 +187,14 @@ export function InvoiceCard({
           {canSend && (
             <button
               onClick={onSend}
-              disabled={sending || !online}
-              title={online ? "إرسال الفاتورة للمدرّس عبر واتساب" : "لا يوجد اتصال بالإنترنت"}
+              disabled={sending || !online || wa.disabled}
+              title={
+                !online
+                  ? "لا يوجد اتصال بالإنترنت"
+                  : wa.disabled
+                    ? (wa.reason ?? "إرسال واتساب غير متاح")
+                    : "إرسال الفاتورة للمدرّس عبر واتساب"
+              }
               className="flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-600 transition hover:border-accent/50 hover:text-accent disabled:cursor-not-allowed disabled:opacity-40"
             >
               {sending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}

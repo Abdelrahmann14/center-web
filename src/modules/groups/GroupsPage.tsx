@@ -1,12 +1,13 @@
 import { Fragment, useEffect, useMemo, useState } from "react";
-import { AlertCircle, Plus, Loader2, Pencil, Power, Trash2, Users, Coins } from "@/components/icons";
+import { Plus, Loader2, Pencil, Power, Trash2, Users, Coins } from "@/components/icons";
 import { DeleteButton } from "@/components/DeleteButton";
 import { api, ApiError } from "@/lib/api";
 import { cachedGet, invalidate } from "@/lib/dataCache";
 import { DAYS, dayLabel } from "@/lib/days";
 import { fmtTime } from "@/lib/datetime";
-import { Modal, Field, Select, FormNotice, Switch, Money, inputClass } from "@/components/ui";
+import { Modal, Field, Select, FormNotice, Switch, Money } from "@/components/ui";
 import { LoaderBlock } from "@/components/PencilLoader";
+import { TimeSelect } from "@/components/TimeSelect";
 import { useToast } from "@/components/Toast";
 
 interface Group {
@@ -56,19 +57,18 @@ const todayDow = (new Date().getDay() + 1) % 7;
  * value can carry seconds - key on HH:mm alone or "16:00" and "16:00:00" would
  * read as two different slots.
  */
-const slotKey = (day: number | string, time: string) => `${day}-${time.slice(0, 5)}`;
 
 /**
- * The first quarter-hour inside `hour` that no group holds yet. Two groups can
- * share a day but not a minute, so offering a taken time from the calendar's +
- * button only earns a rejection - offer the next free one instead.
+ * The time the + button on an empty calendar cell opens the form at.
+ *
+ * <p>It used to hunt for the first quarter-hour nobody held, because a second
+ * group on the same minute was refused. Nothing refuses it now (V89), so the
+ * hour the teacher actually clicked is the honest answer - moving them to :15
+ * to dodge a clash that no longer exists would just be the form quietly
+ * disagreeing with the cell they pressed.
  */
-function freeTimeIn(hour: number, day: number, groups: Group[]): string {
-  const hh = String(hour).padStart(2, "0");
-  const taken = new Set(
-    groups.filter((g) => g.day_of_week === day).map((g) => g.start_time.slice(0, 5))
-  );
-  return ["00", "30", "15", "45"].map((mm) => `${hh}:${mm}`).find((t) => !taken.has(t)) ?? `${hh}:00`;
+function timeIn(hour: number): string {
+  return `${String(hour).padStart(2, "0")}:00`;
 }
 
 /**
@@ -96,7 +96,7 @@ export default function GroupsPage() {
     try {
       const [g, gr, c] = await Promise.all([
         cachedGet<Group[]>("/groups"),
-        cachedGet<Grade[]>("/grades"),
+        cachedGet<Grade[]>("/grades/in-use"),
         cachedGet<Center[]>("/centers"),
       ]);
       // Deleted groups stay in the API (so history labels resolve) but never show
@@ -172,14 +172,6 @@ export default function GroupsPage() {
     [shown]
   );
 
-  // Every occupied (day, time). Built from all groups, never the filtered view -
-  // a center filter must not hide a clash the server would reject anyway.
-  const takenSlots = useMemo(() => {
-    const m = new Map<string, Group>();
-    for (const g of groups) m.set(slotKey(g.day_of_week, g.start_time), g);
-    return m;
-  }, [groups]);
-
   const totalStudents = shown.reduce((sum, g) => sum + g.student_count, 0);
   // Only the centers that actually hold a group are worth offering as filters.
   const usedCenters = Array.from(new Set(groups.map((g) => g.center_name))).sort((a, b) =>
@@ -229,7 +221,7 @@ export default function GroupsPage() {
           groups={shown}
           onEdit={setEditGroup}
           onCreate={(day, hour) => {
-            setPreset({ day, time: freeTimeIn(hour, day, groups) });
+            setPreset({ day, time: timeIn(hour) });
             setShowForm(true);
           }}
         />
@@ -298,7 +290,6 @@ export default function GroupsPage() {
         <GroupForm
           grades={grades}
           centers={centers}
-          taken={takenSlots}
           preset={preset ?? undefined}
           onClose={() => {
             setShowForm(false);
@@ -317,7 +308,6 @@ export default function GroupsPage() {
           initial={editGroup}
           grades={grades}
           centers={centers}
-          taken={takenSlots}
           // The open form is the source of truth for the flag while it is open,
           // so the toggled state has to land back on it - otherwise a second
           // press would compute its flip from the state before the first.
@@ -715,7 +705,6 @@ function GroupForm({
   initial,
   grades,
   centers,
-  taken,
   preset,
   onToggle,
   onDelete,
@@ -725,8 +714,6 @@ function GroupForm({
   initial?: Group;
   grades: Grade[];
   centers: Center[];
-  /** Every (day, time) already holding a group, keyed by slotKey. */
-  taken: Map<string, Group>;
   /** Day and hour the form opened on, when it came from an empty calendar cell. */
   preset?: { day: number; time: string };
   /** Flips the group's active flag; resolves to the state that stuck. */
@@ -747,18 +734,9 @@ function GroupForm({
   const activeCenters = centers.filter((c) => c.is_active || c.name === initial?.center_name);
   const activeGrades = grades.filter((g) => g.is_active || g.name === initial?.grade);
 
-  // The server rejects a second group on the same minute. Say so while the time
-  // is being picked, rather than letting the save fail.
-  const holder = taken.get(slotKey(day, time));
-  const clash = holder && holder.id !== initial?.id ? holder : null;
-
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError("");
-    if (clash) {
-      setError("اختر وقتاً آخر - هذا الموعد محجوز");
-      return;
-    }
     if (!center || !grade) {
       setError("اختر السنتر والصف");
       return;
@@ -829,7 +807,7 @@ function GroupForm({
           <button
             type="submit"
             form="group-form"
-            disabled={saving || clash !== null}
+            disabled={saving}
             className="flex items-center justify-center gap-2 rounded-xl bg-accent px-5 py-2.5 font-medium text-white transition hover:bg-accent-hover disabled:opacity-60"
           >
             {saving ? <Loader2 className="h-5 w-5 animate-spin" /> : <Plus className="h-5 w-5" />}
@@ -844,22 +822,8 @@ function GroupForm({
         </Field>
         <div>
           <Field label="الوقت">
-            <input
-              type="time"
-              value={time}
-              onChange={(e) => setTime(e.target.value)}
-              className={inputClass}
-              dir="ltr"
-            />
+            <TimeSelect value={time} onChange={setTime} />
           </Field>
-          {clash && (
-            <p className="mt-1 flex items-start gap-1 px-1 text-xs font-medium text-rose-600">
-              <AlertCircle className="mt-px h-3.5 w-3.5 shrink-0" />
-              <span>
-                محجوز لمجموعة {clash.center_name} · {clash.grade}
-              </span>
-            </p>
-          )}
         </div>
         <Field label="السنتر">
           <Select

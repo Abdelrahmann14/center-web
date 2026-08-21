@@ -447,13 +447,26 @@ export function MultiSelect({
  */
 export function advanceOnEnter(e: React.KeyboardEvent<HTMLFormElement>) {
   if (e.key !== "Enter" || e.defaultPrevented || e.shiftKey) return;
-  const el = e.target as HTMLElement;
-  if (!(el instanceof HTMLInputElement)) return;
-  if (el.type === "submit" || el.type === "button" || el.type === "checkbox") return;
+  if (advanceWithin(e.currentTarget, e.target as HTMLElement)) e.preventDefault();
+}
 
-  const fields = Array.from(
-    e.currentTarget.querySelectorAll<HTMLElement>("input, textarea"),
-  ).filter(
+/**
+ * Moves focus one field on, or reports that there was nowhere to go.
+ *
+ * <p>Returning false is what lets the LAST field submit: the caller only
+ * swallows the key when the focus actually moved.
+ *
+ * <p>Textareas are deliberately not stops. Enter inside one types a newline, so
+ * walking into a notes box strands the key there - the walk ends at the last
+ * input and submits instead.
+ */
+function advanceWithin(form: HTMLFormElement, el: HTMLElement): boolean {
+  if (!(el instanceof HTMLInputElement)) return false;
+  // Enter on a button IS the click, and on a checkbox or radio the browser has
+  // its own meaning for it. Only value-typing fields walk.
+  if (["submit", "button", "checkbox", "radio", "file", "reset"].includes(el.type)) return false;
+
+  const fields = Array.from(form.querySelectorAll<HTMLElement>("input")).filter(
     (f) =>
       !(f as HTMLInputElement).disabled &&
       !(f as HTMLInputElement).readOnly &&
@@ -462,12 +475,32 @@ export function advanceOnEnter(e: React.KeyboardEvent<HTMLFormElement>) {
       f.offsetParent !== null,
   );
   const i = fields.indexOf(el);
-  if (i === -1 || i === fields.length - 1) return;
+  if (i === -1 || i === fields.length - 1) return false;
 
-  e.preventDefault();
   const next = fields[i + 1];
   next.focus();
   if (next instanceof HTMLInputElement && next.type === "text") next.select();
+  return true;
+}
+
+/**
+ * Makes Enter walk the fields of EVERY form in the app, once, from the document.
+ *
+ * <p>Installed globally rather than added to each form because the rule is about
+ * how the app behaves, not about one screen: a form written next month should
+ * not have to remember to opt in. The listener sits on the document, above
+ * React's own root, so anything a field already did with Enter - an open
+ * suggestion list taking its highlighted row - has marked the event handled by
+ * the time this runs, and is left alone.
+ */
+export function installEnterAdvance() {
+  document.addEventListener("keydown", (e) => {
+    if (e.key !== "Enter" || e.defaultPrevented || e.shiftKey || e.isComposing) return;
+    const el = e.target as HTMLElement | null;
+    const form = el?.closest?.("form");
+    if (!form) return;
+    if (advanceWithin(form, el as HTMLElement)) e.preventDefault();
+  });
 }
 
 export function AutocompleteInput({

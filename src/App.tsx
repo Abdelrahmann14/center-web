@@ -27,17 +27,17 @@ import DashboardHome from "@/pages/DashboardHome";
  * worth their own request.
  */
 const SuperAdminLayout = lazy(() => import("@/pages/SuperAdminLayout"));
-const SuperUsersPage = lazy(() => import("@/modules/superadmin/UsersPage"));
+// The super-admin console lists teachers only: students and guardians had
+// accounts solely for the mobile app, and both went with it.
+const TeachersPage = lazy(() => import("@/modules/superadmin/TeachersPage"));
 const TeacherDetailPage = lazy(() => import("@/modules/superadmin/TeacherDetailPage"));
 const GradesAdminPage = lazy(() => import("@/modules/superadmin/GradesAdminPage"));
-const SystemNotificationsPage = lazy(() => import("@/modules/superadmin/SystemNotificationsPage"));
-const ServicesPage = lazy(() => import("@/modules/superadmin/ServicesPage"));
+const SuperWhatsappPage = lazy(() => import("@/modules/superadmin/WhatsappPage"));
 const GroupsPage = lazy(() => import("@/modules/groups/GroupsPage"));
 const UsersPage = lazy(() => import("@/modules/users/UsersPage"));
 const AnalyticsPage = lazy(() => import("@/modules/analytics/AnalyticsPage"));
 const GradesPage = lazy(() => import("@/modules/grades/GradesPage"));
 const ServiceIntegrationsPage = lazy(() => import("@/modules/services/ServiceIntegrationsPage"));
-const AdminMessagingPage = lazy(() => import("@/modules/notifications/AdminMessagingPage"));
 const StudentsPage = lazy(() => import("@/modules/students/StudentsPage"));
 const StudentAnalyticsPage = lazy(() => import("@/modules/students/StudentAnalyticsPage"));
 const LecturesPage = lazy(() => import("@/modules/lectures/LecturesPage"));
@@ -150,11 +150,15 @@ export default function App() {
           }
         >
           <Route index element={<Navigate to="/users" replace />} />
-          <Route path="users" element={<SuperUsersPage />} />
+          <Route path="users" element={<TeachersPage />} />
           <Route path="teachers/:adminId" element={<TeacherDetailPage />} />
           <Route path="grades" element={<GradesAdminPage />} />
-          <Route path="notifications" element={<SystemNotificationsPage />} />
-          <Route path="services" element={<ServicesPage />} />
+          <Route path="whatsapp" element={<SuperWhatsappPage />} />
+          {/* The console sends nothing, so the old notifications and services
+              screens are gone. Anything still pointing at them lands on the
+              user list rather than a blank route. */}
+          <Route path="notifications" element={<Navigate to="/users" replace />} />
+          <Route path="services" element={<Navigate to="/users" replace />} />
         </Route>
       ) : (
         <Route
@@ -206,10 +210,7 @@ export default function App() {
           <Route path="analytics" element={adminScreen("ANALYTICS") ? <AnalyticsPage /> : <Navigate to="/" replace />} />
           <Route path="grades" element={adminScreen("GROUPS") ? <GradesPage /> : <Navigate to="/" replace />} />
           <Route path="users" element={adminScreen("ASSISTANTS") ? <UsersPage /> : <Navigate to="/" replace />} />
-          <Route
-            path="notifications"
-            element={can("NOTIFICATION_SEND") ? <AdminMessagingPage /> : <Navigate to="/" replace />}
-          />
+          <Route path="notifications" element={<Navigate to="/services" replace />} />
           <Route
             path="services"
             element={isAdmin ? <ServiceIntegrationsPage /> : <Navigate to="/" replace />}
