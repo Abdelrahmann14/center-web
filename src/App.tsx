@@ -219,7 +219,7 @@ export default function App() {
           <Route
             path="messages"
             element={
-              can("NOTIFICATION_SEND") || can("NOTIFICATION_LOG_VIEW") ? (
+              isAdmin || can("NOTIFICATION_SEND") || can("NOTIFICATION_LOG_VIEW") ? (
                 <MessagesPage />
               ) : (
                 <Navigate to="/" replace />

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import {
   AlertCircle,
   ArrowRight,
@@ -76,6 +77,49 @@ type Message = {
 const BASE = "/messaging/whatsapp/inbox";
 
 /**
+ * WhatsApp's own colours, on purpose.
+ *
+ * <p>The rest of this product is teal-on-white and should stay that way. A chat
+ * is the one screen where the reader already has thirty thousand hours of
+ * practice somewhere else: mint on the right is mine, white on the left is
+ * theirs, and the beige behind both is what tells a bubble from the page. Using
+ * the house palette here meant two greys a shade apart, which is a puzzle, not a
+ * conversation.
+ *
+ * <p>Hex rather than Tailwind steps because these are specific colours, not
+ * points on a scale - `bg-green-100` is not #D9FDD3 and never will be.
+ */
+const WA = {
+  /** The paper the conversation is written on. */
+  canvas: "#EFEAE2",
+  /** Ours. */
+  out: "#D9FDD3",
+  /** Theirs. */
+  in: "#FFFFFF",
+  ink: "#111B21",
+  /** Timestamps, ticks, the second line of a list row. */
+  muted: "#667781",
+  /** Header and composer bars - a half-step off the canvas. */
+  bar: "#F0F2F5",
+  /** Read ticks, and nothing else. */
+  read: "#53BDEB",
+  /** Unread count. */
+  badge: "#25D366",
+  line: "#E9EDEF",
+} as const;
+
+/**
+ * The faint pattern behind a conversation.
+ *
+ * <p>Our own tile, not WhatsApp's doodles - those are theirs. Two ring sizes on
+ * a 60px grid at four percent, which is enough to stop the canvas reading as
+ * flat card stock and far too little to compete with a word of text. Inline as a
+ * data URI so the page still draws it with no connection.
+ */
+const CANVAS_PATTERN =
+  "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='60' height='60' viewBox='0 0 60 60'%3E%3Cg fill='none' stroke='%230B141A' stroke-opacity='0.04' stroke-width='1.5'%3E%3Ccircle cx='15' cy='15' r='6'/%3E%3Ccircle cx='45' cy='45' r='9'/%3E%3Cpath d='M42 12l6 6M48 12l-6 6M12 42l6 6M18 42l-6 6'/%3E%3C/g%3E%3C/svg%3E\")";
+
+/**
  * How often each pane re-reads.
  *
  * <p>There is no push channel to the browser in this app, so a reply arrives
@@ -129,8 +173,14 @@ export function useInboxUnread(enabled = true) {
 }
 
 export function WhatsappInbox() {
+  // `?c=<id>` is how the notification bell hands over a thread. Consumed once
+  // and stripped, so a later back-navigation does not yank the reader out of
+  // whatever conversation they have since moved to.
+  const [params, setParams] = useSearchParams();
+  const requested = params.get("c");
+
   const [conversations, setConversations] = useState<Conversation[] | null>(null);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(requested);
   const [search, setSearch] = useState("");
   const [archived, setArchived] = useState(false);
   const query = useDebounced(search.trim(), 300);
@@ -149,6 +199,12 @@ export function WhatsappInbox() {
   useEffect(load, [load]);
   usePoll(load, LIST_POLL_MS);
 
+  useEffect(() => {
+    if (!requested) return;
+    setSelectedId(requested);
+    setParams({}, { replace: true });
+  }, [requested, setParams]);
+
   const selected = useMemo(
     () => conversations?.find((c) => c.id === selectedId) ?? null,
     [conversations, selectedId],
@@ -157,10 +213,11 @@ export function WhatsappInbox() {
   // A thread whose row vanished (search narrowed, or it was archived) must not
   // leave the reading pane showing a conversation that is no longer listed.
   useEffect(() => {
+    if (requested) return;
     if (selectedId && conversations && !conversations.some((c) => c.id === selectedId)) {
       setSelectedId(null);
     }
-  }, [conversations, selectedId]);
+  }, [conversations, selectedId, requested]);
 
   if (!conversations) return <LoaderBlock />;
 
@@ -169,7 +226,11 @@ export function WhatsappInbox() {
        and the thread on the other, each staying put while the other moves. A
        page-level scroll would drag the composer off the bottom of the screen
        the moment a thread got long. */
-    <div className="flex h-[calc(100vh-16rem)] min-h-[30rem] overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+    /* Sized to what is actually left of the viewport. It was short by a hand's
+       width, which put a strip of dead page under the composer - the one place
+       on the screen where every pixel is the conversation. The mobile figure is
+       larger because the layout's own top bar only exists below lg. */
+    <div className="flex h-[calc(100dvh-16rem)] min-h-[26rem] overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm lg:h-[calc(100dvh-13.5rem)]">
       <aside
         className={`flex w-full shrink-0 flex-col border-slate-200 sm:w-80 sm:border-e lg:w-96 ${
           selectedId ? "hidden sm:flex" : "flex"
@@ -316,9 +377,8 @@ function ConversationRow({
       type="button"
       onClick={onClick}
       aria-current={active ? "true" : undefined}
-      className={`flex w-full items-center gap-3 border-b border-slate-100 px-3 py-2.5 text-start transition ${
-        active ? "bg-accent/10" : "hover:bg-slate-50"
-      }`}
+      className="flex w-full items-center gap-3 border-b px-3 py-2.5 text-start transition hover:bg-slate-50"
+      style={{ borderColor: WA.line, backgroundColor: active ? WA.bar : undefined }}
     >
       <Avatar name={row.name} kind={row.contact_kind} />
       <div className="min-w-0 flex-1">
@@ -334,7 +394,10 @@ function ConversationRow({
             {row.last_preview ?? "—"}
           </p>
           {row.unread > 0 && (
-            <span className="shrink-0 rounded-full bg-accent px-1.5 py-0.5 text-[10px] font-bold text-white">
+            <span
+              className="shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-bold text-white"
+              style={{ backgroundColor: WA.badge }}
+            >
               {arabicDigits(row.unread)}
             </span>
           )}
@@ -420,7 +483,10 @@ function Avatar({ name, kind }: { name: string; kind: Conversation["contact_kind
 
 function NothingSelected() {
   return (
-    <div className="flex flex-1 flex-col items-center justify-center gap-3 bg-slate-50 p-8 text-center">
+    <div
+      className="flex flex-1 flex-col items-center justify-center gap-3 p-8 text-center"
+      style={{ backgroundColor: WA.canvas, backgroundImage: CANVAS_PATTERN }}
+    >
       <MessageCircle className="h-10 w-10 text-slate-300" />
       <p className="text-sm font-semibold text-slate-600">اختر محادثة لقراءتها والرد عليها</p>
       <p className="max-w-sm text-xs leading-6 text-slate-400">
@@ -495,7 +561,8 @@ function Thread({
       <div
         ref={scroller}
         onScroll={onScroll}
-        className="min-h-0 flex-1 space-y-1 overflow-y-auto bg-slate-50 px-3 py-4 sm:px-6"
+        className="min-h-0 flex-1 space-y-1 overflow-y-auto px-3 py-4 sm:px-6"
+        style={{ backgroundColor: WA.canvas, backgroundImage: CANVAS_PATTERN }}
       >
         {messages === null ? (
           <LoaderBlock />
@@ -540,7 +607,10 @@ function ThreadHeader({
   };
 
   return (
-    <header className="flex items-center gap-3 border-b border-slate-200 px-3 py-2.5 sm:px-4">
+    <header
+      className="flex items-center gap-3 border-b px-3 py-2.5 sm:px-4"
+      style={{ backgroundColor: WA.bar, borderColor: WA.line }}
+    >
       <button
         type="button"
         onClick={onBack}
@@ -639,7 +709,10 @@ function WindowTimer({ conversation: c }: { conversation: Conversation }) {
 function DaySeparator({ iso }: { iso: string }) {
   return (
     <div className="my-3 flex justify-center">
-      <span className="rounded-full bg-white px-3 py-1 text-[11px] font-semibold text-slate-400 shadow-sm">
+      <span
+        className="rounded-lg px-3 py-1 text-[11px] font-semibold shadow-sm"
+        style={{ backgroundColor: WA.in, color: WA.muted }}
+      >
         {dayLabel(iso)}
       </span>
     </div>
@@ -661,21 +734,25 @@ function Bubble({ message: m }: { message: Message }) {
   return (
     <div className={`flex ${out ? "justify-end" : "justify-start"}`}>
       <div
-        className={`max-w-[85%] rounded-2xl px-3 py-2 text-sm leading-6 shadow-sm sm:max-w-[70%] ${
-          failed
-            ? "border border-rose-200 bg-rose-50 text-rose-900"
-            : out
-              ? "bg-accent text-white"
-              : "border border-slate-200 bg-white text-slate-800"
+        // A tail on the outer corner, the WhatsApp way: the corner nearest the
+        // speaker is squared off and the other three are round, which is what
+        // makes a run of bubbles read as coming from one side before a single
+        // word is read.
+        className={`max-w-[85%] px-2.5 py-1.5 text-sm leading-6 shadow-sm sm:max-w-[70%] ${
+          out ? "rounded-2xl rounded-es-md" : "rounded-2xl rounded-ss-md"
         }`}
+        style={{
+          backgroundColor: failed ? "#FFF1F2" : out ? WA.out : WA.in,
+          color: failed ? "#881337" : WA.ink,
+          border: failed ? "1px solid #FECDD3" : undefined,
+        }}
       >
         {m.has_media && <Attachment message={m} outgoing={out} />}
         {m.body && <p className="whitespace-pre-wrap break-words">{m.body}</p>}
 
         <div
-          className={`mt-0.5 flex items-center justify-end gap-1 text-[10px] ${
-            failed ? "text-rose-400" : out ? "text-white/70" : "text-slate-400"
-          }`}
+          className="mt-0.5 flex items-center justify-end gap-1 text-[10px]"
+          style={{ color: failed ? "#9F1239" : WA.muted }}
         >
           {out && m.sent_by_name && <span className="truncate">{m.sent_by_name}</span>}
           <span>{clock(m.occurred_at)}</span>
@@ -709,7 +786,7 @@ function Ticks({ status }: { status: Message["status"] }) {
 
   const double = status === "DELIVERED" || status === "READ";
   return (
-    <span className={`inline-flex ${status === "READ" ? "text-sky-300" : ""}`}>
+    <span className="inline-flex" style={status === "READ" ? { color: WA.read } : undefined}>
       <Check className="h-3 w-3" />
       {double && <Check className="-ms-1.5 h-3 w-3" />}
     </span>
@@ -896,8 +973,8 @@ function Composer({
        button parked beside it. The whole strip is what takes the focus ring, so
        the two read as one control - which is what every messenger the reader
        has ever used looks like. */
-    <div className="border-t border-slate-200 bg-white p-2 sm:p-3">
-      <div className="flex items-end gap-1 rounded-[1.375rem] border border-slate-200 bg-slate-50 p-1 transition focus-within:border-accent focus-within:bg-white">
+    <div className="border-t p-2 sm:p-3" style={{ backgroundColor: WA.bar, borderColor: WA.line }}>
+      <div className="flex items-end gap-1 rounded-[1.375rem] border border-transparent bg-white p-1 shadow-sm transition focus-within:border-accent">
         <EmojiPickerButton
           onPick={insertEmoji}
           onBeforeOpen={remember}
@@ -926,6 +1003,7 @@ function Composer({
           // the background and the ring all belong to the pill above, so the
           // textarea itself is transparent and chrome-free.
           className="max-h-40 flex-1 resize-none border-0 bg-transparent py-2 pe-1 text-sm leading-6 outline-none placeholder:text-slate-400 [scrollbar-width:thin]"
+          style={{ color: WA.ink }}
         />
         <button
           type="button"

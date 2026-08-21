@@ -34,6 +34,16 @@ interface NavItem {
   /** Admin-only screens (the workspace owner), never assistants. */
   adminOnly?: boolean;
   /**
+   * The workspace owner always sees this, permissions or not.
+   *
+   * <p>Not a privilege change: an admin already holds every permission of every
+   * module enabled for them (PermissionRepository.findAdminPermissionCodes), so
+   * this only stops the SIDEBAR from disagreeing with the server about a screen
+   * that is unambiguously theirs. The module gate above still applies, so a
+   * screen the super admin switched off stays gone.
+   */
+  adminAlways?: boolean;
+  /**
    * The screen still works with no connection - its reads are answered by the
    * offline mirror (see WebSyncStore.resolveRead) and its writes are queued.
    *
@@ -70,7 +80,7 @@ const NAV: NavItem[] = [
   // Not `offline`: a conversation is a live thing. The mirror cannot answer a
   // thread, and a chat screen that opens empty with no way to refresh is worse
   // than no door at all.
-  { to: "/messages", label: "الرسائل", icon: <MessageCircle className="h-5 w-5" />, perm: ["NOTIFICATION_SEND", "NOTIFICATION_LOG_VIEW"] },
+  { to: "/messages", label: "الرسائل", icon: <MessageCircle className="h-5 w-5" />, perm: ["NOTIFICATION_SEND", "NOTIFICATION_LOG_VIEW"] , adminAlways: true, module: "NOTIFICATIONS" },
   // An exam is a question paper; this is the only "?" in the set.
   { to: "/exams", label: "الاختبارات", icon: <FileQuestion className="h-5 w-5" />, perm: ["EXAM_CREATE", "EXAM_UPDATE", "EXAM_DELETE", "EXAM_PUBLISH"] },
   // Columns, not a trend line: the data is per-lesson counts, not a time series.
@@ -144,6 +154,7 @@ export default function DashboardLayout() {
     // reachable - see NavItem.offline.
     if (!online && !n.offline) return false;
     if (n.module && !hasModule(n.module)) return false;
+    if (n.adminAlways && effectiveRole === "admin") return true;
     return n.adminOnly ? effectiveRole === "admin" : n.perm ? n.perm.some(can) : true;
   });
 

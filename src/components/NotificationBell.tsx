@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { useNavigate } from "react-router-dom";
 import { BellRing } from "@/components/icons";
 import { api } from "@/lib/api";
 import { Modal } from "@/components/ui";
@@ -7,12 +8,29 @@ import { Modal } from "@/components/ui";
 interface Notif {
   id: string;
   sender: string;
-  /** The sender's profile photo (base64 data URL), when they have one. */
+  /**
+   * What raised it. "chat" is somebody writing to the centre on WhatsApp, which
+   * is what this bell is now mostly for; "whatsapp" is the platform reporting
+   * that one of the numbers stopped working.
+   */
   type: string;
   title: string | null;
   body: string;
+  /** Where it leads. For "chat" this is the conversation. */
+  link_id: string | null;
   read: boolean;
   created_at: string;
+}
+
+/**
+ * Where a notification takes you, or null when it goes nowhere.
+ *
+ * <p>Only the ones that can actually be acted on are links. A row that looked
+ * clickable and then did nothing would teach the reader to stop clicking the
+ * ones that work.
+ */
+function destination(n: Notif): string | null {
+  return n.type === "chat" && n.link_id ? `/messages?c=${n.link_id}` : null;
 }
 
 const fmt = (iso: string) =>
@@ -28,6 +46,7 @@ const fmt = (iso: string) =>
  * on screen, where every message is shown in full.
  */
 export function NotificationBell() {
+  const navigate = useNavigate();
   const [count, setCount] = useState(0);
   const [open, setOpen] = useState(false);
   const [showAll, setShowAll] = useState(false);
@@ -59,8 +78,19 @@ export function NotificationBell() {
 
   useEffect(() => {
     loadCount();
-    const t = setInterval(loadCount, 30000);
-    return () => clearInterval(t);
+    const t = setInterval(() => {
+      if (!document.hidden) void loadCount();
+    }, 30000);
+    // Coming back to the tab is the moment somebody wants to know what they
+    // missed; waiting out the rest of the interval is the wrong answer.
+    const onVisible = () => {
+      if (!document.hidden) void loadCount();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      clearInterval(t);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
   }, []);
 
   useEffect(() => {
@@ -196,9 +226,17 @@ export function NotificationBell() {
                 items.map((n) => (
                   <div
                     key={n.id}
+                    role={destination(n) ? "button" : undefined}
+                    tabIndex={destination(n) ? 0 : undefined}
+                    onClick={() => {
+                      const to = destination(n);
+                      if (!to) return;
+                      setOpen(false);
+                      navigate(to);
+                    }}
                     className={`flex w-full items-start gap-3 border-b border-slate-100 px-4 py-3 text-right ${
                       n.read ? "" : "bg-accent/5"
-                    }`}
+                    } ${destination(n) ? "cursor-pointer transition hover:bg-slate-50" : ""}`}
                   >
                     <Avatar />
                     <div className="min-w-0 flex-1">
@@ -216,8 +254,15 @@ export function NotificationBell() {
                         {n.body}
                       </p>
                       <div className="mt-1.5 flex items-center gap-1.5 text-[11px] text-slate-400">
-                        <span className="truncate">{n.sender}</span>
-                        <span className="text-slate-300">·</span>
+                        {/* The sender only when it adds something. On a chat row
+                            it IS the title, and printing it twice made every row
+                            look like it had said the name for a reason. */}
+                        {n.sender && n.sender !== (n.title || n.sender) && (
+                          <>
+                            <span className="truncate">{n.sender}</span>
+                            <span className="text-slate-300">·</span>
+                          </>
+                        )}
                         <span className="shrink-0" dir="ltr">{fmt(n.created_at)}</span>
                       </div>
                     </div>

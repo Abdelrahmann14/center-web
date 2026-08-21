@@ -23,9 +23,12 @@ import { WhatsappLog } from "@/modules/services/WhatsappLog";
 type TabKey = "inbox" | "log";
 
 export default function MessagesPage() {
-  const { can } = useAuth();
-  const maySend = can("NOTIFICATION_SEND");
-  const mayReadLog = can("NOTIFICATION_LOG_VIEW");
+  const { can, effectiveRole } = useAuth();
+  // The owner of a workspace holds every permission of every module enabled for
+  // them, so asking twice is asking the browser to disagree with the server.
+  const isAdmin = effectiveRole === "admin";
+  const maySend = isAdmin || can("NOTIFICATION_SEND");
+  const mayReadLog = isAdmin || can("NOTIFICATION_LOG_VIEW");
 
   // Open on whichever tab this person can actually use, rather than always on
   // the inbox and bouncing somebody who only holds the log grant.

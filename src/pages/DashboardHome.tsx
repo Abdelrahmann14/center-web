@@ -43,6 +43,8 @@ interface ModuleCard {
   perm?: string[];
   /** Admin-only screens (the workspace owner), never assistants. */
   adminOnly?: boolean;
+  /** The workspace owner always sees this - the module gate still applies. */
+  adminAlways?: boolean;
   /** Module gate, for admin-only screens that carry no permission of their own. */
   module?: string;
   /** Works with no connection - same list as NAV in DashboardLayout, same reason. */
@@ -132,6 +134,9 @@ const MODULES: ModuleCard[] = [
     icon: <MessageCircle className="h-6 w-6" />,
     section: "comms",
     perm: ["NOTIFICATION_SEND", "NOTIFICATION_LOG_VIEW"],
+    // See NavItem.adminAlways: the owner always reaches their own inbox.
+    adminAlways: true,
+    module: "NOTIFICATIONS",
   },
   {
     to: "/services",
@@ -199,6 +204,7 @@ export default function DashboardHome() {
     // than left to open on an empty page - same rule as the sidebar.
     if (!online && !m.offline) return false;
     if (m.module && !hasModule(m.module)) return false;
+    if (m.adminAlways && effectiveRole === "admin") return true;
     return m.adminOnly ? effectiveRole === "admin" : m.perm ? m.perm.some(can) : true;
   });
 
