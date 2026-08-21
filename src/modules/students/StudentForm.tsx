@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
-import { Plus, Loader2, X, Barcode } from "@/components/icons";
+import { Plus, Loader2, X, Barcode, CheckCircle2, Ban, MessageCircle } from "@/components/icons";
 import { api, ApiError, isOfflineError, qs } from "@/lib/api";
 import { cachedGet, setCache } from "@/lib/dataCache";
 import { dayLabel } from "@/lib/days";
 import { fmtTime } from "@/lib/datetime";
 import { useDebounced } from "@/lib/useDebounced";
+import { useWhatsappNumberCheck } from "@/lib/useWhatsappNumberCheck";
 import { useOnline } from "@/lib/useOnline";
 import { useSync } from "@/sync/SyncProvider";
 import { NAME_MIN_PARTS, nameParts, isFullName } from "@/lib/studentName";
@@ -131,6 +132,46 @@ export interface Student {
 export const groupLabel = (g: Group) =>
   `${dayLabel(g.day_of_week)} · ${fmtTime(g.start_time)} · ${g.center_name}`;
 
+/**
+ * Whether the number just typed is on WhatsApp.
+ *
+ * <p>Sits under the field rather than inside it: the answer arrives a moment
+ * after the last digit, and a badge appearing INSIDE an input shifts the caret
+ * or covers what was typed. Silent until there is something to say - a half
+ * typed number gets no mark at all, because a red mark on a number that is
+ * simply unfinished reads as a rejection.
+ *
+ * <p>"Unknown" is shown as its own grey state, never as "no WhatsApp". They lead
+ * to opposite actions: one means ask the family for another number, the other
+ * means the check is off and this number is probably fine.
+ */
+function WhatsappMark({ phone }: { phone: string }) {
+  const state = useWhatsappNumberCheck(phone);
+  if (state === "idle") return null;
+
+  const look = {
+    checking: { cls: "text-slate-400", text: "جارٍ التحقق من واتساب..." },
+    yes: { cls: "text-green-600", text: "الرقم على واتساب" },
+    no: { cls: "text-rose-600", text: "الرقم ليس على واتساب — لن تصله الرسائل" },
+    unknown: { cls: "text-slate-400", text: "تعذّر التحقق من واتساب" },
+  }[state];
+
+  return (
+    <p className={`mt-1 flex items-center gap-1.5 text-xs font-medium ${look.cls}`}>
+      {state === "checking" ? (
+        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+      ) : state === "yes" ? (
+        <CheckCircle2 className="h-3.5 w-3.5" />
+      ) : state === "no" ? (
+        <Ban className="h-3.5 w-3.5" />
+      ) : (
+        <MessageCircle className="h-3.5 w-3.5" />
+      )}
+      {look.text}
+    </p>
+  );
+}
+
 function PhoneList({
   label,
   phones,
@@ -180,6 +221,7 @@ function PhoneList({
                   required={i === 0}
                   className={`${inputClass} ${errors[i] ? "border-rose-400 focus:border-rose-400 focus:ring-rose-200" : ""}`}
                 />
+                <WhatsappMark phone={p} />
               </Field>
               {phones.length > 1 && (
                 <button

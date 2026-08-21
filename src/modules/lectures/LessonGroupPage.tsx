@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { QuotaHint, sendResultMessage, useWhatsappQuota, type Quota } from "@/components/WhatsappQuota";
 import { Link, useParams } from "react-router-dom";
 import {
   ArrowRight,
@@ -77,6 +78,29 @@ const SAME_GROUP = "نفس المجموعة";
 /** The two message batches sent from this page, spelled as the API spells them. */
 type SendKind = "attendance" | "exam-grade";
 
+/**
+ * What a send button now answers with.
+ *
+ * <p>It queues rather than sends, so this is a promise: `sendable_now` go
+ * immediately, `waiting` go by themselves as Meta's rolling 24-hour allowance
+ * frees up recipients, and `duplicate` were already owed or already sent.
+ */
+type SendResponse = {
+  sent: number;
+  failed: number;
+  total: number;
+  batch_id: string | null;
+  queued: number;
+  duplicate: number;
+  sendable_now: number;
+  waiting: number;
+  next_free_at: string | null;
+  remaining: number;
+  tier: number;
+  blocked: boolean;
+  blocked_reason: string | null;
+};
+
 const EMPTY_SET: ReadonlySet<string> = new Set();
 
 /**
@@ -118,6 +142,7 @@ export default function LessonGroupPage() {
   const [statusKey, setStatusKey] = useState(0);
   const [armed, setArmed] = useState<SendKind | null>(null);
   const [sending, setSending] = useState<SendKind | null>(null);
+  const { quota, refresh: refreshQuota } = useWhatsappQuota();
   /** The absentee list, loaded BEFORE the dialog opens - see openAbsentees. */
   const [absentees, setAbsentees] = useState<Absentee[] | null>(null);
   const [absentBusy, setAbsentBusy] = useState(false);
@@ -361,14 +386,21 @@ export default function LessonGroupPage() {
     if (sending) return;
     setSending(kind);
     try {
-      const res = await api.post<{ sent: number; failed: number; total: number }>(
+      const res = await api.post<SendResponse>(
         `/messaging/whatsapp/lectures/${lectureId}/groups/${groupId}/${kind}`,
       );
-      const failed = res.failed > 0 ? `، فشل ${res.failed.toLocaleString("ar-EG")}` : "";
-      toast.success(`تم إرسال ${res.sent.toLocaleString("ar-EG")} رسالة${failed}`, {
-        title: "تم الإرسال",
+      // The button queues; it does not send. So the toast says what is actually
+      // true - how many are going now, and how many are waiting for the daily
+      // allowance to free up - rather than reporting a delivery that has not
+      // happened yet.
+      toast[res.blocked ? "info" : "success"](sendResultMessage(res), {
+        title: res.waiting > 0 ? "تم جدولة الإرسال" : "تم الإرسال",
       });
+      if (res.blocked && res.blocked_reason) {
+        toast.info(res.blocked_reason, { title: "حصة واتساب" });
+      }
       setArmed(null);
+      refreshQuota();
       // Re-read who has been messaged, so the columns and the next arm are true.
       setStatusKey((n) => n + 1);
     } catch (err) {
@@ -508,6 +540,7 @@ export default function LessonGroupPage() {
                     ? (waAttendance.reason ?? "إرسال واتساب غير متاح")
                     : "عرض من ستصلهم رسالة الحضور ثم إرسالها")
                 }
+                quota={quota}
                 onClick={() => armOrSend("attendance")}
                 onCancel={() => setArmed(null)}
               />
@@ -547,6 +580,7 @@ export default function LessonGroupPage() {
                         ? (waExam.reason ?? "إرسال واتساب غير متاح")
                         : "عرض من ستصلهم درجته ثم إرسالها"))
                 }
+                quota={quota}
                 onClick={() => armOrSend("exam-grade")}
                 onCancel={() => setArmed(null)}
               />
@@ -880,6 +914,7 @@ function SendButton({
   busy,
   disabled,
   title,
+  quota,
   onClick,
   onCancel,
 }: {
@@ -891,12 +926,17 @@ function SendButton({
   busy: boolean;
   disabled: boolean;
   title?: string;
+  quota: Quota | null;
   onClick: () => void;
   onCancel: () => void;
 }) {
   const t = SEND_TONES[tone];
   return (
-    <div className="flex shrink-0 items-center">
+    // A column, so the allowance can sit under the button without widening it.
+    // The hint is absolutely positioned rather than in flow: a number that
+    // appears and disappears must not make the whole toolbar jump.
+    <div className="relative flex shrink-0 flex-col">
+      <div className="flex items-center">
       <button
         type="button"
         onClick={onClick}
@@ -920,6 +960,8 @@ function SendButton({
           <X className="h-4 w-4" />
         </button>
       )}
+      </div>
+      <QuotaHint quota={quota} className="absolute -bottom-4 start-1 whitespace-nowrap" />
     </div>
   );
 }
@@ -948,6 +990,7 @@ function AbsenteesModal({
 }) {
   const [rows, setRows] = useState<Absentee[] | null>(initial);
   const [busy, setBusy] = useState(false);
+  const { quota, refresh: refreshQuota } = useWhatsappQuota(lectureId, "ABSENCE");
 
   // Only a KNOWN "not sent" is a target: offline the flag is null, and sending
   // then would risk a second copy of a message the parent already has.
@@ -956,13 +999,13 @@ function AbsenteesModal({
   async function send() {
     setBusy(true);
     try {
-      const res = await api.post<{ sent: number; failed: number; total: number }>(
+      const res = await api.post<SendResponse>(
         `/messaging/whatsapp/lectures/${lectureId}/groups/${groupId}/absence`,
       );
-      const failed = res.failed > 0 ? `، فشل ${res.failed.toLocaleString("ar-EG")}` : "";
-      toast.success(`تم إرسال ${res.sent.toLocaleString("ar-EG")} رسالة${failed}`, {
-        title: "تم الإرسال",
+      toast[res.blocked ? "info" : "success"](sendResultMessage(res), {
+        title: res.waiting > 0 ? "تم جدولة الإرسال" : "تم الإرسال",
       });
+      refreshQuota();
       // Stay open with the list refreshed: it is now the receipt for what just
       // went out, one line per parent. A failed refresh keeps the old list
       // rather than blanking a dialog whose send actually succeeded.
@@ -984,16 +1027,19 @@ function AbsenteesModal({
       subtitle={rows ? `${rows.length.toLocaleString("ar-EG")} طالب لم يحضر هذه الحصة` : undefined}
       onClose={onClose}
       footer={
-        <button
-          type="button"
-          onClick={send}
-          disabled={!canSend || busy || pending === 0}
-          title={canSend ? undefined : "لا يوجد اتصال بالإنترنت"}
-          className="flex items-center gap-2 rounded-xl bg-rose-600 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-rose-700 disabled:opacity-50"
-        >
-          {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-          إرسال رسائل الغياب ({pending.toLocaleString("ar-EG")})
-        </button>
+        <div className="flex flex-col gap-1">
+          <button
+            type="button"
+            onClick={send}
+            disabled={!canSend || busy || pending === 0}
+            title={canSend ? undefined : "لا يوجد اتصال بالإنترنت"}
+            className="flex items-center gap-2 rounded-xl bg-rose-600 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-rose-700 disabled:opacity-50"
+          >
+            {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+            إرسال رسائل الغياب ({pending.toLocaleString("ar-EG")})
+          </button>
+          <QuotaHint quota={quota} className="px-1" />
+        </div>
       }
     >
       {rows === null ? (
