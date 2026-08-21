@@ -187,7 +187,7 @@ interface AvailableTemplate {
  * The approved templates this account has been given.
  *
  * <p>Read-only, and shown only because the alternative is worse: the message a
- * parent receives is the template's text, not the text on the الرسائل page, and
+ * parent receives is the template's text, not the text on the القوالب page, and
  * a teacher who cannot see the template has no way to know what was actually
  * sent in their name.
  */
