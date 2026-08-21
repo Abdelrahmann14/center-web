@@ -6,6 +6,7 @@ import { dayLabel } from "@/lib/days";
 import { fmtTime } from "@/lib/datetime";
 import { useDebounced } from "@/lib/useDebounced";
 import { useWhatsappNumberCheck } from "@/lib/useWhatsappNumberCheck";
+import { useWhatsappAction } from "@/lib/useWhatsappAvailability";
 import { useOnline } from "@/lib/useOnline";
 import { useSync } from "@/sync/SyncProvider";
 import { NAME_MIN_PARTS, nameParts, isFullName } from "@/lib/studentName";
@@ -281,6 +282,11 @@ export function StudentForm({
   const isEdit = initial !== undefined;
   const toast = useToast();
   const autoBarcode = useAutoBarcode(isEdit);
+  // The switch decides whether saving a student SENDS them a card over WhatsApp,
+  // so it is a send control and follows the same availability every send button
+  // does. Left live while sending is paused it would promise a message that the
+  // server refuses the moment it is asked.
+  const waBarcode = useWhatsappAction("barcode");
   const sync = useSync();
   const online = useOnline();
   const activeGrades = grades.filter((g) => g.is_active || g.name === initial?.grade);
@@ -632,17 +638,25 @@ export function StudentForm({
             <span
               className="flex items-center gap-1.5"
               title={
-                autoBarcode.on
-                  ? "إرسال الباركود تلقائياً: كل طالب تضيفه أنت سيصله كارت الباركود على واتساب فور حفظه. الإعداد يخصّ حسابك وحده."
-                  : "إرسال الباركود تلقائياً: مُغلق. لن يُرسل باركود عند إضافتك لطالب — أرسله لاحقاً من زر «إرسال الباركود». الإعداد يخصّ حسابك وحده."
+                waBarcode.disabled
+                  ? (waBarcode.reason ?? "إرسال واتساب غير متاح")
+                  : autoBarcode.on
+                    ? "إرسال الباركود تلقائياً: كل طالب تضيفه أنت سيصله كارت الباركود على واتساب فور حفظه. الإعداد يخصّ حسابك وحده."
+                    : "إرسال الباركود تلقائياً: مُغلق. لن يُرسل باركود عند إضافتك لطالب — أرسله لاحقاً من زر «إرسال الباركود». الإعداد يخصّ حسابك وحده."
               }
             >
               <Barcode
-                className={`h-4 w-4 shrink-0 ${autoBarcode.on ? "text-accent" : "text-slate-400"}`}
+                className={`h-4 w-4 shrink-0 ${
+                  autoBarcode.on && !waBarcode.disabled ? "text-accent" : "text-slate-400"
+                }`}
               />
+              {/* Drawn OFF while sending is unavailable even when the stored
+                  setting is on: the switch answers "will a card go out when I
+                  save", and right now nothing goes out. The stored value is
+                  untouched and returns as soon as sending does. */}
               <Toggle
-                checked={autoBarcode.on}
-                disabled={autoBarcode.saving}
+                checked={autoBarcode.on && !waBarcode.disabled}
+                disabled={autoBarcode.saving || waBarcode.disabled}
                 onChange={(next) => void autoBarcode.set(next)}
               />
             </span>
