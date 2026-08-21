@@ -921,7 +921,7 @@ function StudentPanel({
           {student && differentGroup && (
             <span
               title="طالب من مجموعة أخرى - هذه مجموعته الأصلية"
-              className="inline-flex w-fit items-center gap-1.5 rounded-xl border border-purple-300 bg-purple-50 px-3 py-1.5 font-medium text-purple-700"
+              className="inline-flex w-fit items-center gap-1.5 rounded-xl border border-purple-400 bg-purple-100 px-3 py-1.5 font-medium text-purple-800"
             >
               <ArrowRightLeft className="h-4 w-4 shrink-0" />
               {groupLabelFor(student.group_id)}
@@ -932,7 +932,7 @@ function StudentPanel({
           {student && alreadyAttendedGroup && (
             <span
               title="حضر هذه الحصة بالفعل - يمكن إضافته لهذه المجموعة بعد التأكيد"
-              className="inline-flex w-fit items-center gap-1.5 rounded-xl border border-blue-300 bg-blue-50 px-3 py-1.5 font-medium text-blue-700"
+              className="inline-flex w-fit items-center gap-1.5 rounded-xl border border-blue-400 bg-blue-100 px-3 py-1.5 font-medium text-blue-800"
             >
               <AlertTriangle className="h-4 w-4 shrink-0" />
               حضر في: {alreadyAttendedGroup}
@@ -944,7 +944,7 @@ function StudentPanel({
           {student?.is_discounted && (
             <span
               title="سعر مخفّض عن سعر السنتر - السبب ضمن البيانات بجانب السعر"
-              className="inline-flex w-fit items-center gap-1.5 rounded-xl border border-orange-300 bg-orange-50 px-3 py-1.5 font-medium text-orange-700"
+              className="inline-flex w-fit items-center gap-1.5 rounded-xl border border-orange-400 bg-orange-100 px-3 py-1.5 font-medium text-orange-800"
             >
               <Percent className="h-4 w-4 shrink-0" />
               {student.lesson_price === 0 ? "معفي" : "مُخفَّض"}
@@ -1174,15 +1174,15 @@ function HistoryStrip({ history }: { history: HistoryItem[] }) {
       {history.length > 0 && (
         <div className="mb-2.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-500">
           <span className="flex items-center gap-1.5">
-            <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-green-100 ring-1 ring-green-400" />
+            <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-green-200 ring-1 ring-green-500" />
             حاضر
           </span>
           <span className="flex items-center gap-1.5">
-            <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-amber-100 ring-1 ring-amber-400" />
+            <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-amber-200 ring-1 ring-amber-500" />
             حاضر ولم يُختبر
           </span>
           <span className="flex items-center gap-1.5">
-            <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-rose-100 ring-1 ring-rose-400" />
+            <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-rose-200 ring-1 ring-rose-500" />
             غائب
           </span>
         </div>
@@ -1210,10 +1210,10 @@ function HistoryStrip({ history }: { history: HistoryItem[] }) {
               // splits on whether the exam was actually taken.
               className={`rounded-xl border p-3 ${HISTORY_CARD} ${
                 !present
-                  ? "border-rose-200 bg-rose-100"
+                  ? "border-rose-300 bg-rose-200"
                   : sat
-                    ? "border-green-200 bg-green-100"
-                    : "border-amber-200 bg-amber-100"
+                    ? "border-green-300 bg-green-200"
+                    : "border-amber-300 bg-amber-200"
               }`}
             >
               <div className="truncate font-medium text-slate-800" title={h.lecture_name}>

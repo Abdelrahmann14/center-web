@@ -1024,19 +1024,19 @@ export default function StudentsPage() {
             the rows use, so the key reads as a direct sample, not a guess. */}
         <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-slate-500">
           <span className="flex items-center gap-1.5">
-            <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-amber-100 ring-1 ring-amber-400" />
+            <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-amber-200 ring-1 ring-amber-500" />
             بيانات ناقصة
           </span>
           <span className="flex items-center gap-1.5">
-            <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-purple-100 ring-1 ring-purple-400" />
+            <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-purple-200 ring-1 ring-purple-500" />
             تكرار الاسم/الرقم
           </span>
           <span className="flex items-center gap-1.5">
-            <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-sky-100 ring-1 ring-sky-400" />
+            <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-sky-200 ring-1 ring-sky-500" />
             تكرار رقم ولي الأمر
           </span>
           <span className="flex items-center gap-1.5">
-            <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-rose-100 ring-1 ring-rose-400" />
+            <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-rose-200 ring-1 ring-rose-500" />
             محظور
           </span>
           {/* The green/red dots beside the phone numbers are NOT listed here.
@@ -1107,13 +1107,13 @@ export default function StudentsPage() {
                   // Priority: blocked (rose) → name/phone dup (purple) → shared
                   // parent (sky) → incomplete (amber) → none.
                   const tone = !s.is_active
-                    ? "bg-rose-100 hover:bg-rose-200"
+                    ? "bg-rose-200 hover:bg-rose-300"
                     : dupNamePhone
-                      ? "bg-purple-100 hover:bg-purple-200"
+                      ? "bg-purple-200 hover:bg-purple-300"
                       : dupParent
-                        ? "bg-sky-100 hover:bg-sky-200"
+                        ? "bg-sky-200 hover:bg-sky-300"
                         : missing
-                          ? "bg-amber-100 hover:bg-amber-200"
+                          ? "bg-amber-200 hover:bg-amber-300"
                           : "hover:bg-slate-50/60";
                   return (
                     <tr
@@ -1195,14 +1195,14 @@ export default function StudentsPage() {
                         {s.lesson_price == null ? (
                           <Dash />
                         ) : s.lesson_price === 0 ? (
-                          <span className="rounded-md bg-green-50 px-1.5 py-0.5 text-[11px] font-medium text-green-700">
+                          <span className="rounded-md bg-green-100 px-1.5 py-0.5 text-[11px] font-medium text-green-700">
                             معفي
                           </span>
                         ) : (
                           <span className="flex flex-wrap items-center gap-1">
                             <Money value={s.lesson_price} className="text-slate-700" />
                             {s.is_discounted && (
-                              <span className="rounded-md bg-amber-100 px-1 py-0.5 text-[10px] font-medium text-amber-700">
+                              <span className="rounded-md bg-amber-200 px-1 py-0.5 text-[10px] font-medium text-amber-700">
                                 مُخَفَّض
                               </span>
                             )}
