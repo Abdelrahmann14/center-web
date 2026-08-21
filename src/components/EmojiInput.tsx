@@ -17,6 +17,12 @@ import { EMOJI_GROUPS, type Emoji } from "@/data/emoji";
  * library, and no images fetched from anywhere, so it works with no connection.
  * At this size the grid is windowed and the search is what actually finds
  * things; browsing four thousand cells is not a way to pick one.
+ *
+ * <p>The palette itself is {@link EmojiPickerButton}, separate from the input,
+ * because the WhatsApp composer wants the same picker over a TEXTAREA. It was
+ * welded into this component when there was only one caller; keeping it welded
+ * would have meant a second copy of four thousand glyphs and a second set of
+ * placement bugs.
  */
 
 /** Cells per row. The panel width is derived from this. */
@@ -44,22 +50,27 @@ function searchIndex(): Emoji[] {
   return SEARCH_INDEX;
 }
 
-export function EmojiInput({
-  value,
-  onChange,
-  placeholder,
-  maxLength,
-  className = "",
-  ariaLabel,
+/**
+ * The smiley button and the palette that hangs off it.
+ *
+ * <p>Owns nothing but the palette: which group is showing, what was searched,
+ * where the panel sits. The caller owns the text and decides what "insert"
+ * means for it - a caret position in an input, the end of a textarea - which is
+ * the whole reason this is separate.
+ *
+ * @param onPick       called with the glyph. The caller inserts it.
+ * @param onBeforeOpen a chance to remember where the caret was, before focus
+ *                     moves to the palette
+ */
+export function EmojiPickerButton({
+  onPick,
+  onBeforeOpen,
+  buttonClassName = "",
 }: {
-  value: string;
-  onChange: (value: string) => void;
-  placeholder?: string;
-  maxLength?: number;
-  className?: string;
-  ariaLabel?: string;
+  onPick: (glyph: string) => void;
+  onBeforeOpen?: () => void;
+  buttonClassName?: string;
 }) {
-  const inputRef = useRef<HTMLInputElement>(null);
   const btnRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const gridRef = useRef<HTMLDivElement>(null);
@@ -68,8 +79,6 @@ export function EmojiInput({
   const [group, setGroup] = useState(0);
   const [query, setQuery] = useState("");
   const [scrollTop, setScrollTop] = useState(0);
-  // Where the caret was when focus left the input for the palette.
-  const caret = useRef<number | null>(null);
 
   // Search spans every group; with no query the active tab is the source.
   const items: readonly Emoji[] = useMemo(() => {
@@ -154,59 +163,25 @@ export function EmojiInput({
     };
   }, [open, place]);
 
-  function insert(glyph: string) {
-    const el = inputRef.current;
-    const at = caret.current ?? el?.selectionStart ?? value.length;
-    const next = value.slice(0, at) + glyph + value.slice(at);
-    if (maxLength !== undefined && next.length > maxLength) return;
-    onChange(next);
-    // Put the caret after what was just inserted, so a second pick lands beside
-    // the first instead of jumping back.
-    const after = at + glyph.length;
-    caret.current = after;
-    requestAnimationFrame(() => {
-      el?.focus();
-      el?.setSelectionRange(after, after);
-    });
-  }
-
-  const remember = () => {
-    caret.current = inputRef.current?.selectionStart ?? null;
-  };
-
   return (
     <>
-      <div className="relative">
-        <input
-          ref={inputRef}
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          onSelect={remember}
-          onKeyUp={remember}
-          onClick={remember}
-          maxLength={maxLength}
-          placeholder={placeholder}
-          aria-label={ariaLabel}
-          className={`${inputClass} pl-10 ${className}`}
-        />
-        <button
-          ref={btnRef}
-          type="button"
-          title="إدراج رمز تعبيري"
-          aria-label="إدراج رمز تعبيري"
-          onMouseDown={(e) => {
-            // Keep the caret: focus must not leave the input on mouse-down.
-            e.preventDefault();
-            remember();
-          }}
-          onClick={() => setOpen((o) => !o)}
-          className={`absolute left-1.5 top-1/2 grid h-7 w-7 -translate-y-1/2 place-items-center rounded-lg transition ${
-            open ? "bg-accent/10 text-accent" : "text-slate-400 hover:bg-slate-100 hover:text-slate-600"
-          }`}
-        >
-          <Smile className="h-4 w-4" />
-        </button>
-      </div>
+      <button
+        ref={btnRef}
+        type="button"
+        title="إدراج رمز تعبيري"
+        aria-label="إدراج رمز تعبيري"
+        onMouseDown={(e) => {
+          // Keep the caret: focus must not leave the field on mouse-down.
+          e.preventDefault();
+          onBeforeOpen?.();
+        }}
+        onClick={() => setOpen((o) => !o)}
+        className={`grid place-items-center rounded-lg transition ${
+          open ? "bg-accent/10 text-accent" : "text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+        } ${buttonClassName}`}
+      >
+        <Smile className="h-4 w-4" />
+      </button>
 
       {open &&
         createPortal(
@@ -281,7 +256,7 @@ export function EmojiInput({
                         type="button"
                         title={name}
                         onMouseDown={(e) => e.preventDefault()}
-                        onClick={() => insert(glyph)}
+                        onClick={() => onPick(glyph)}
                         className="grid place-items-center rounded-lg text-xl leading-none transition hover:bg-slate-100"
                         style={{ height: ROW_H }}
                       >
@@ -300,5 +275,67 @@ export function EmojiInput({
           document.body
         )}
     </>
+  );
+}
+
+export function EmojiInput({
+  value,
+  onChange,
+  placeholder,
+  maxLength,
+  className = "",
+  ariaLabel,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  placeholder?: string;
+  maxLength?: number;
+  className?: string;
+  ariaLabel?: string;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  // Where the caret was when focus left the input for the palette.
+  const caret = useRef<number | null>(null);
+
+  function insert(glyph: string) {
+    const el = inputRef.current;
+    const at = caret.current ?? el?.selectionStart ?? value.length;
+    const next = value.slice(0, at) + glyph + value.slice(at);
+    if (maxLength !== undefined && next.length > maxLength) return;
+    onChange(next);
+    // Put the caret after what was just inserted, so a second pick lands beside
+    // the first instead of jumping back.
+    const after = at + glyph.length;
+    caret.current = after;
+    requestAnimationFrame(() => {
+      el?.focus();
+      el?.setSelectionRange(after, after);
+    });
+  }
+
+  const remember = () => {
+    caret.current = inputRef.current?.selectionStart ?? null;
+  };
+
+  return (
+    <div className="relative">
+      <input
+        ref={inputRef}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        onSelect={remember}
+        onKeyUp={remember}
+        onClick={remember}
+        maxLength={maxLength}
+        placeholder={placeholder}
+        aria-label={ariaLabel}
+        className={`${inputClass} pl-10 ${className}`}
+      />
+      <EmojiPickerButton
+        onPick={insert}
+        onBeforeOpen={remember}
+        buttonClassName="absolute left-1.5 top-1/2 h-7 w-7 -translate-y-1/2"
+      />
+    </div>
   );
 }

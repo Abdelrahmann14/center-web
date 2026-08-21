@@ -16,6 +16,7 @@ import { api, ApiError, getFile } from "@/lib/api";
 import { arabicDigits } from "@/lib/datetime";
 import { useDebounced } from "@/lib/useDebounced";
 import { toast } from "@/components/ui/toast";
+import { EmojiPickerButton } from "@/components/EmojiInput";
 import { LoaderBlock } from "@/components/PencilLoader";
 
 /**
@@ -489,6 +490,7 @@ function Thread({
   return (
     <div className="flex min-w-0 flex-1 flex-col">
       <ThreadHeader conversation={conversation} onBack={onBack} onChanged={onChanged} />
+      <WindowTimer conversation={conversation} />
 
       <div
         ref={scroller}
@@ -572,6 +574,65 @@ function ThreadHeader({
         {c.archived ? "إعادة" : "أرشفة"}
       </button>
     </header>
+  );
+}
+
+/**
+ * The countdown on the window, ticking, at the top of the thread.
+ *
+ * <p>It sits here rather than under the composer because it is a fact about the
+ * CONVERSATION, not about the text box - and because a deadline that matters is
+ * read on the way in, not discovered after typing. Under the composer it was a
+ * static line nobody looked at twice; here it moves, so it is believed.
+ *
+ * <p>It resets by itself. The thread's `window_ends_at` is re-read on every poll,
+ * so the moment that person writes again the clock jumps back up to 24 hours
+ * without anything here having to know that a message arrived.
+ */
+function WindowTimer({ conversation: c }: { conversation: Conversation }) {
+  const [, tick] = useState(0);
+
+  // One second, because it is a clock and a clock that jumps a minute at a time
+  // reads as broken. One state bump per second on one mounted thread is free.
+  useEffect(() => {
+    const id = window.setInterval(() => tick((n) => n + 1), 1000);
+    return () => window.clearInterval(id);
+  }, []);
+
+  if (!c.window_open || !c.window_ends_at) return null;
+
+  const ms = new Date(c.window_ends_at).getTime() - Date.now();
+  if (!Number.isFinite(ms) || ms <= 0) return null;
+
+  const total = Math.floor(ms / 1000);
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  const seconds = total % 60;
+
+  // Colour by how much is left, not by a fixed palette: under an hour the
+  // window is the most urgent thing on the screen, and above six it is only
+  // information.
+  const tone =
+    hours < 1
+      ? "bg-rose-50 text-rose-700"
+      : hours < 6
+        ? "bg-amber-50 text-amber-800"
+        : "bg-slate-50 text-slate-500";
+
+  return (
+    <div
+      className={`flex items-center justify-center gap-2 border-b border-slate-200 px-3 py-1.5 text-[11px] font-semibold ${tone}`}
+      title="واتساب يسمح بالرد بنص حر ٢٤ ساعة من آخر رسالة يرسلها الشخص. العدّاد يرجع من أوله لو بعت تاني."
+    >
+      <Clock className="h-3.5 w-3.5 shrink-0" />
+      <span>متبقّي للرد الحر</span>
+      {/* Latin tabular figures: Arabic-Indic digits are not tabular, so a
+          ticking clock written in them jitters sideways every second. */}
+      <span dir="ltr" className="font-clock tabular-nums tracking-tight">
+        {String(hours).padStart(2, "0")}:{String(minutes).padStart(2, "0")}:
+        {String(seconds).padStart(2, "0")}
+      </span>
+    </div>
   );
 }
 
@@ -744,6 +805,12 @@ function Attachment({ message: m, outgoing }: { message: Message; outgoing: bool
  * by the sentence that explains why and what to do instead. A greyed-out text
  * box with a tooltip would leave the reader believing the feature was broken.
  */
+/** Where the composer stops growing and starts scrolling. Matches `max-h-40`. */
+const MAX_COMPOSER_PX = 160;
+
+/** WhatsApp's own ceiling on one text message. The server refuses past it too. */
+const MAX_BODY = 4096;
+
 function Composer({
   conversation: c,
   onSent,
@@ -754,13 +821,44 @@ function Composer({
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
   const box = useRef<HTMLTextAreaElement>(null);
+  // Where the caret was when focus left the box for the emoji palette.
+  const caret = useRef<number | null>(null);
 
-  // Grow with the text, up to a point - past that the thread would disappear.
+  const remember = () => {
+    caret.current = box.current?.selectionStart ?? null;
+  };
+
+  /** Drop a glyph at the caret, not at the end - an emoji belongs mid-sentence. */
+  const insertEmoji = (glyph: string) => {
+    const el = box.current;
+    const at = caret.current ?? el?.selectionStart ?? text.length;
+    const next = text.slice(0, at) + glyph + text.slice(at);
+    if (next.length > MAX_BODY) return;
+    setText(next);
+    const after = at + glyph.length;
+    caret.current = after;
+    requestAnimationFrame(() => {
+      el?.focus();
+      el?.setSelectionRange(after, after);
+    });
+  };
+
+  /**
+   * Grow with the text, and carry a scrollbar ONLY once there is something to
+   * scroll.
+   *
+   * <p>A textarea reserves the gutter permanently the moment overflow is
+   * scrollable, so a one-line box sat there with a dead grey stripe down its
+   * side and the text pushed off-centre. Toggling overflow at the growth ceiling
+   * is what makes it read as a line of text rather than as a form field.
+   */
   useEffect(() => {
     const el = box.current;
     if (!el) return;
     el.style.height = "auto";
-    el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
+    const wanted = el.scrollHeight;
+    el.style.height = `${Math.min(wanted, MAX_COMPOSER_PX)}px`;
+    el.style.overflowY = wanted > MAX_COMPOSER_PX ? "auto" : "hidden";
   }, [text]);
 
   if (!c.window_open) {
@@ -794,14 +892,26 @@ function Composer({
   };
 
   return (
-    <div className="border-t border-slate-200 bg-white px-3 py-2.5 sm:px-4">
-      <div className="flex items-end gap-2">
+    /* One pill holding the text and the button, rather than a field with a
+       button parked beside it. The whole strip is what takes the focus ring, so
+       the two read as one control - which is what every messenger the reader
+       has ever used looks like. */
+    <div className="border-t border-slate-200 bg-white p-2 sm:p-3">
+      <div className="flex items-end gap-1 rounded-[1.375rem] border border-slate-200 bg-slate-50 p-1 transition focus-within:border-accent focus-within:bg-white">
+        <EmojiPickerButton
+          onPick={insertEmoji}
+          onBeforeOpen={remember}
+          buttonClassName="mb-0.5 h-9 w-9 shrink-0"
+        />
         <textarea
           ref={box}
           rows={1}
           value={text}
-          maxLength={4096}
+          maxLength={MAX_BODY}
           onChange={(e) => setText(e.target.value)}
+          onSelect={remember}
+          onKeyUp={remember}
+          onClick={remember}
           onKeyDown={(e) => {
             // Enter sends, Shift+Enter breaks the line. The composer is used far
             // more often for one sentence than for a paragraph.
@@ -811,28 +921,28 @@ function Composer({
             }
           }}
           placeholder="اكتب ردك…"
-          className="max-h-40 min-h-[2.5rem] flex-1 resize-none rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm leading-6 outline-none transition focus:border-accent focus:bg-white"
+          aria-label="نص الرد"
+          // The scrollbar is thin and only appears past the ceiling; the border,
+          // the background and the ring all belong to the pill above, so the
+          // textarea itself is transparent and chrome-free.
+          className="max-h-40 flex-1 resize-none border-0 bg-transparent py-2 pe-1 text-sm leading-6 outline-none placeholder:text-slate-400 [scrollbar-width:thin]"
         />
         <button
           type="button"
           onClick={send}
           disabled={sending || text.trim().length === 0}
-          aria-label="إرسال"
-          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-accent text-white transition hover:bg-accent-hover disabled:opacity-40"
+          aria-label="إرسال (Enter)"
+          title="Enter للإرسال · Shift+Enter لسطر جديد"
+          className="mb-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-accent text-white transition hover:bg-accent-hover disabled:bg-slate-200 disabled:text-slate-400"
         >
           <Send className="h-4 w-4" />
         </button>
       </div>
-      <p className="mt-1 text-[10px] text-slate-400">
-        {remainingAr(c.window_ends_at)} · Enter للإرسال، Shift+Enter لسطر جديد
-      </p>
     </div>
   );
 }
 
 // ── formatting ────────────────────────────────────────────────────────────
-
-const AR = (n: number) => n.toLocaleString("ar-EG");
 
 /** ١:٤٥ م */
 function clock(iso: string): string {
@@ -876,18 +986,3 @@ function dayChanged(previous: Message | undefined, current: Message): boolean {
   return daysApart(new Date(previous.occurred_at), new Date(current.occurred_at)) !== 0;
 }
 
-/**
- * How long is left to answer freely.
- *
- * <p>Deliberately a duration and not a deadline: "٣ ساعات" is something a
- * person acts on, while "تنتهي ٤:١٥ م" has to be worked out against the clock
- * first, and the whole point of the line is to say "answer now".
- */
-function remainingAr(endsAt: string | null): string {
-  if (!endsAt) return "الرد الحر متاح";
-  const ms = new Date(endsAt).getTime() - Date.now();
-  if (!Number.isFinite(ms) || ms <= 0) return "انتهت مدة الرد";
-  const minutes = Math.floor(ms / 60_000);
-  if (minutes < 60) return `متبقّي ${AR(minutes)} دقيقة للرد الحر`;
-  return `متبقّي ${AR(Math.floor(minutes / 60))} ساعة للرد الحر`;
-}
