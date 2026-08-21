@@ -11,6 +11,14 @@ import {
 import { api } from "@/lib/api";
 import { LoaderBlock } from "@/components/PencilLoader";
 import { WhatsappLogo } from "@/components/WhatsappLogo";
+import { Switch } from "@/components/ui";
+import { toast } from "@/components/Toast";
+import { ApiError } from "@/lib/api";
+import {
+  setWhatsappAvailability,
+  useWhatsappAvailability,
+  type WhatsappAvailability,
+} from "@/lib/useWhatsappAvailability";
 
 function numberName(n: WaNumber): string {
   if (n.label && n.label.trim()) return n.label;
@@ -215,6 +223,8 @@ export function WhatsappDashboard() {
         </div>
       </div>
 
+      <SendingSwitch />
+
       {!usage ? (
         <p className="rounded-2xl border border-dashed border-slate-300 bg-white px-6 py-10 text-center text-sm text-slate-400">
           تعذّر تحميل بيانات الاستخدام.
@@ -403,5 +413,60 @@ function TypesPanel({ types }: { types: TypeVolume[] }) {
         )}
       </div>
     </div>
+  );
+}
+
+/**
+ * The workspace's master switch for WhatsApp sending.
+ *
+ * <p>One control that decides whether every send button in the app is live.
+ * It sits on this page because this is where a teacher already comes to ask
+ * "is my WhatsApp working" - the answer and the switch belong together.
+ *
+ * <p>Off is drawn as a WARNING rather than a neutral state. A silent pause is
+ * the failure mode that matters here: nobody notices messages that were never
+ * sent, so the screen has to keep saying so.
+ */
+function SendingSwitch() {
+  const { availability, loading } = useWhatsappAvailability();
+  const [saving, setSaving] = useState(false);
+
+  // The platform switch is the super admin's, and a teacher cannot argue with
+  // it. Showing a dead toggle they cannot move would only invite the question.
+  if (loading || !availability.enabled) return null;
+
+  const on = availability.sending_enabled;
+
+  async function toggle() {
+    setSaving(true);
+    try {
+      const next = await api.put<WhatsappAvailability>("/services/whatsapp/sending", {
+        enabled: !on,
+      });
+      setWhatsappAvailability(next);
+      toast.success(next.sending_enabled ? "تم تفعيل إرسال الواتساب" : "تم إيقاف إرسال الواتساب");
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "تعذّر تغيير الحالة");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <section
+      className={`flex items-center justify-between gap-4 rounded-2xl border p-4 shadow-sm transition sm:p-5 ${
+        on ? "border-slate-200 bg-white" : "border-amber-300 bg-amber-50"
+      }`}
+    >
+      <div className="min-w-0">
+        <h3 className="font-bold text-slate-800">إرسال الواتساب</h3>
+        <p className="mt-1 text-xs leading-6 text-slate-500" dir="auto">
+          {on
+            ? "كل أزرار إرسال الواتساب في النظام مفعّلة."
+            : "كل أزرار إرسال الواتساب مطفية، ولن تخرج أي رسالة تلقائية."}
+        </p>
+      </div>
+      <Switch checked={on} onChange={toggle} disabled={saving} />
+    </section>
   );
 }

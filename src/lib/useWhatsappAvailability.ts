@@ -29,7 +29,10 @@ export interface WhatsappMessageType {
 }
 
 export interface WhatsappAvailability {
+  /** The super admin granted the feature to this workspace. */
   enabled: boolean;
+  /** The workspace's own master switch. False = every send button is off. */
+  sending_enabled: boolean;
   connected_count: number;
   types: WhatsappMessageType[];
 }
@@ -37,6 +40,7 @@ export interface WhatsappAvailability {
 /** What a screen assumes before the answer arrives: nothing is available yet. */
 const UNKNOWN: WhatsappAvailability = {
   enabled: false,
+  sending_enabled: false,
   connected_count: 0,
   types: [],
 };
@@ -60,6 +64,18 @@ function load(): Promise<WhatsappAvailability> {
 export function refreshWhatsapp() {
   cache = null;
   load().then((a) => listeners.forEach((fn) => fn(a)));
+}
+
+/**
+ * Publishes an availability the caller already holds.
+ *
+ * <p>The sending switch returns the whole picture, so re-fetching it would ask
+ * the server a question it just answered - and would leave every button on
+ * every mounted screen disagreeing with the switch until the round trip landed.
+ */
+export function setWhatsappAvailability(next: WhatsappAvailability) {
+  cache = Promise.resolve(next);
+  listeners.forEach((fn) => fn(next));
 }
 
 /**

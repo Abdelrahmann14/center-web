@@ -1,13 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  Search, X, MessageCircle, Users, Clock, CheckCircle2, Ban, RotateCcw,
+  Search, X, MessageCircle, Users, Clock, CheckCircle2, Ban, RotateCcw, Trash2, Loader2,
 } from "@/components/icons";
-import { cachedGetAll } from "@/lib/dataCache";
+import { cachedGetAll, invalidate } from "@/lib/dataCache";
+import { api, ApiError } from "@/lib/api";
+import { toast } from "@/components/ui/toast";
 import { usePageState } from "@/lib/pageState";
 import { useDebounced } from "@/lib/useDebounced";
 import { LoaderBlock } from "@/components/PencilLoader";
 import { THEAD } from "@/components/tableStyles";
-import { Select, inputClass } from "@/components/ui";
+import { Select, Modal, inputClass } from "@/components/ui";
 import { MultiSelectFilter } from "@/components/MultiSelectFilter";
 import { DatePicker } from "@/components/DatePicker";
 import { Pagination } from "@/components/Pagination";
@@ -133,12 +135,17 @@ function HistoryTab() {
   const [page, setPage] = usePageState("messages.page", 1);
   const [perPageStr, setPerPageStr] = usePageState("messages.rows", "25");
   const [colF, setColF] = useState<Partial<Record<FieldKey, Set<string>>>>({});
+  const [clearing, setClearing] = useState(false);
   const perPage = Number(perPageStr) || 25;
   const debounced = useDebounced(search);
   const mounted = useRef(false);
 
-  useEffect(() => {
+  const load = () =>
     cachedGetAll<LogRow>("/messaging/whatsapp/log").then(setRows).catch(() => setRows([]));
+
+  useEffect(() => {
+    void load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const setCol = (key: FieldKey, next: Set<string>) => setColF((c) => ({ ...c, [key]: next }));
@@ -228,6 +235,14 @@ function HistoryTab() {
             كل الأيام
           </button>
         )}
+        <button
+          type="button"
+          onClick={() => setClearing(true)}
+          className="flex items-center gap-1.5 rounded-xl border border-slate-300 px-3 py-2 text-sm font-medium text-slate-600 transition hover:border-rose-300 hover:bg-rose-50 hover:text-rose-700"
+        >
+          <Trash2 className="h-4 w-4" />
+          مسح السجل
+        </button>
         <div className="ms-auto flex items-center gap-2 text-sm text-slate-500">
           <span>عرض</span>
           <div className="w-20">
@@ -333,6 +348,131 @@ function HistoryTab() {
           {filtered.length.toLocaleString("ar-EG")} رسالة
         </span>
       </div>
+
+      {clearing && (
+        <ClearLogModal
+          onClose={() => setClearing(false)}
+          onCleared={() => {
+            setClearing(false);
+            invalidate("/messaging/whatsapp/log");
+            void load();
+          }}
+        />
+      )}
     </div>
+  );
+}
+
+/**
+ * Deletes send history: one range of days, or the lot.
+ *
+ * <p>Nothing is pre-selected and the range starts empty, so the destructive
+ * default is never one click away - a person has to say which days they mean, or
+ * say explicitly that they mean all of them. The count comes back from the
+ * server rather than being guessed from the filtered table, because the table
+ * shows one page of a filtered view and the delete does not care about either.
+ */
+function ClearLogModal({ onClose, onCleared }: { onClose: () => void; onCleared: () => void }) {
+  const [mode, setMode] = useState<"range" | "all">("range");
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const rangeReady = from !== "" && to !== "" && from <= to;
+  const ready = mode === "all" || rangeReady;
+
+  async function submit() {
+    setBusy(true);
+    try {
+      const qs = mode === "all" ? "" : `?from=${from}&to=${to}`;
+      const r = await api.del<{ deleted: number }>(`/messaging/whatsapp/log${qs}`);
+      toast.success(
+        r.deleted > 0
+          ? `تم مسح ${r.deleted.toLocaleString("ar-EG")} رسالة من السجل`
+          : "لا توجد رسائل في هذه المدة",
+      );
+      onCleared();
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "تعذّر مسح السجل");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Modal
+      title="مسح سجل الرسائل"
+      onClose={onClose}
+      footer={
+        <>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-xl border border-slate-300 px-4 py-2.5 font-medium text-slate-600 transition hover:bg-slate-50"
+          >
+            إلغاء
+          </button>
+          <button
+            type="button"
+            onClick={() => void submit()}
+            disabled={busy || !ready}
+            className="flex items-center gap-2 rounded-xl bg-rose-600 px-5 py-2.5 font-medium text-white transition hover:bg-rose-700 disabled:opacity-60"
+          >
+            {busy ? <Loader2 className="h-5 w-5 animate-spin" /> : <Trash2 className="h-5 w-5" />}
+            مسح
+          </button>
+        </>
+      }
+    >
+      <div className="space-y-4">
+        <div className="grid grid-cols-2 gap-2">
+          {(
+            [
+              { key: "range", label: "مدة محددة" },
+              { key: "all", label: "السجل كله" },
+            ] as const
+          ).map((o) => (
+            <button
+              key={o.key}
+              type="button"
+              onClick={() => setMode(o.key)}
+              className={`rounded-xl px-3 py-2.5 text-sm font-medium transition ${
+                mode === o.key
+                  ? "bg-accent text-white"
+                  : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+              }`}
+            >
+              {o.label}
+            </button>
+          ))}
+        </div>
+
+        {mode === "range" ? (
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div>
+              <p className="mb-1.5 text-sm font-medium text-slate-700">من يوم</p>
+              <DatePicker value={from} onChange={setFrom} placeholder="اختر اليوم" />
+            </div>
+            <div>
+              <p className="mb-1.5 text-sm font-medium text-slate-700">إلى يوم</p>
+              <DatePicker value={to} onChange={setTo} placeholder="اختر اليوم" />
+            </div>
+            {from !== "" && to !== "" && !rangeReady && (
+              <p className="text-xs font-medium text-rose-600 sm:col-span-2">
+                تاريخ البداية بعد تاريخ النهاية
+              </p>
+            )}
+          </div>
+        ) : null}
+
+        <p className="rounded-xl bg-amber-50 px-3 py-2.5 text-xs leading-6 text-amber-800">
+          {mode === "all"
+            ? "سيتم حذف سجل الرسائل بالكامل."
+            : "سيتم حذف رسائل هذه المدة، واليومان المحددان داخل المدة."}{" "}
+          الرسائل التي وصلت لن تُسترجع من الواتساب — هذا يمسح السجل فقط، ولا يمكن التراجع عنه.
+          الحصص التي مُسح سجلها ستقبل الإرسال مرة أخرى.
+        </p>
+      </div>
+    </Modal>
   );
 }
