@@ -12,7 +12,7 @@ import { api } from "@/lib/api";
 import { LoaderBlock } from "@/components/PencilLoader";
 import { WhatsappLogo } from "@/components/WhatsappLogo";
 import { Switch } from "@/components/ui";
-import { toast } from "@/components/Toast";
+import { toast } from "@/components/ui/toast";
 import { ApiError } from "@/lib/api";
 import {
   setWhatsappAvailability,
