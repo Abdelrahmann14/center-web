@@ -69,12 +69,27 @@ type Message = {
   failure_code: number | null;
   failure_reason: string | null;
   sent_by_name: string | null;
+  /** The approved template this went out as. Null for anything a person typed. */
+  template_name: string | null;
   occurred_at: string;
   delivered_at: string | null;
   read_at: string | null;
 };
 
 const BASE = "/messaging/whatsapp/inbox";
+
+/**
+ * Which slice of the list is on screen.
+ *
+ * <p>"replied" exists because the system's own messages now open threads. That
+ * is right - they are the same conversation on the parent's phone - but it means
+ * a centre messaging four hundred parents a day has four hundred rows, and the
+ * six people actually waiting for an answer are somewhere inside them. This is
+ * the filter that gets them back: a thread somebody has WRITTEN into at least
+ * once, which is the only thing separating a conversation from a delivery
+ * record.
+ */
+type Scope = "all" | "replied" | "archived";
 
 /**
  * WhatsApp's own colours, on purpose.
@@ -193,19 +208,20 @@ export function WhatsappInbox() {
   const [conversations, setConversations] = useState<Conversation[] | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(requested);
   const [search, setSearch] = useState("");
-  const [archived, setArchived] = useState(false);
+  const [scope, setScope] = useState<Scope>("all");
   const query = useDebounced(search.trim(), 300);
 
   const load = useCallback(() => {
     const params = new URLSearchParams();
     if (query) params.set("query", query);
-    if (archived) params.set("archived", "true");
+    if (scope === "archived") params.set("archived", "true");
+    if (scope === "replied") params.set("replied", "true");
     const suffix = params.toString();
     api
       .get<Conversation[]>(`${BASE}/conversations${suffix ? `?${suffix}` : ""}`)
       .then(setConversations)
       .catch(() => setConversations([]));
-  }, [query, archived]);
+  }, [query, scope]);
 
   useEffect(load, [load]);
   usePoll(load, LIST_POLL_MS);
@@ -247,17 +263,12 @@ export function WhatsappInbox() {
           selectedId ? "hidden sm:flex" : "flex"
         }`}
       >
-        <ListHeader
-          search={search}
-          onSearch={setSearch}
-          archived={archived}
-          onArchived={setArchived}
-        />
+        <ListHeader search={search} onSearch={setSearch} scope={scope} onScope={setScope} />
         <ConversationList
           rows={conversations}
           selectedId={selectedId}
           onSelect={setSelectedId}
-          archived={archived}
+          scope={scope}
         />
         <OpenByPhone
           search={query}
@@ -286,16 +297,22 @@ export function WhatsappInbox() {
   );
 }
 
+const SCOPES: { key: Scope; label: string; title: string }[] = [
+  { key: "all", label: "الكل", title: "كل المحادثات، بما فيها اللي النظام بدأها" },
+  { key: "replied", label: "ردّوا", title: "اللي بعتوا لك رسالة — دول بس اللي ممكن ترد عليهم بنص حر" },
+  { key: "archived", label: "المؤرشفة", title: "المحادثات اللي أخفيتها" },
+];
+
 function ListHeader({
   search,
   onSearch,
-  archived,
-  onArchived,
+  scope,
+  onScope,
 }: {
   search: string;
   onSearch: (v: string) => void;
-  archived: boolean;
-  onArchived: (v: boolean) => void;
+  scope: Scope;
+  onScope: (v: Scope) => void;
 }) {
   return (
     <div className="space-y-2 border-b border-slate-200 p-3">
@@ -309,52 +326,57 @@ function ListHeader({
         />
       </div>
       <div className="flex gap-1 text-xs font-semibold">
-        <button
-          type="button"
-          onClick={() => onArchived(false)}
-          className={`rounded-lg px-2.5 py-1 transition ${
-            archived ? "text-slate-500 hover:bg-slate-100" : "bg-dark text-white"
-          }`}
-        >
-          الحالية
-        </button>
-        <button
-          type="button"
-          onClick={() => onArchived(true)}
-          className={`rounded-lg px-2.5 py-1 transition ${
-            archived ? "bg-dark text-white" : "text-slate-500 hover:bg-slate-100"
-          }`}
-        >
-          المؤرشفة
-        </button>
+        {SCOPES.map((t) => (
+          <button
+            key={t.key}
+            type="button"
+            title={t.title}
+            onClick={() => onScope(t.key)}
+            className={`rounded-lg px-2.5 py-1 transition-all duration-200 active:scale-95 ${
+              scope === t.key
+                ? "bg-dark text-white shadow-sm"
+                : "text-slate-500 hover:bg-slate-100"
+            }`}
+          >
+            {t.label}
+          </button>
+        ))}
       </div>
     </div>
   );
 }
 
+const EMPTY: Record<Scope, { title: string; hint?: string }> = {
+  all: {
+    title: "لا توجد محادثات بعد",
+    hint: "المحادثة تُفتح بأول رسالة — سواء رسالة قالب يبعتها النظام، أو رسالة يبعتها ولي الأمر على رقم السنتر.",
+  },
+  replied: {
+    title: "محدش رد لسه",
+    hint: "هنا بس اللي بعتوا لك. دول اللي واتساب بيسمح لك ترد عليهم بنص حر، وليهم ٢٤ ساعة من آخر رسالة منهم.",
+  },
+  archived: { title: "لا توجد محادثات مؤرشفة" },
+};
+
 function ConversationList({
   rows,
   selectedId,
   onSelect,
-  archived,
+  scope,
 }: {
   rows: Conversation[];
   selectedId: string | null;
   onSelect: (id: string) => void;
-  archived: boolean;
+  scope: Scope;
 }) {
   if (rows.length === 0) {
+    const empty = EMPTY[scope];
     return (
-      <div className="flex flex-1 flex-col items-center justify-center gap-2 p-6 text-center">
+      <div className="flex flex-1 animate-fade-in flex-col items-center justify-center gap-2 p-6 text-center">
         <MessageCircle className="h-8 w-8 text-slate-300" />
-        <p className="text-sm font-semibold text-slate-600">
-          {archived ? "لا توجد محادثات مؤرشفة" : "لا توجد محادثات بعد"}
-        </p>
-        {!archived && (
-          <p className="max-w-[16rem] text-xs leading-5 text-slate-400">
-            المحادثة تبدأ عندما يرسل ولي الأمر أو الطالب رسالة على رقم السنتر. الرسائل التي ترسلها
-            أنت بالأزرار لا تفتح محادثة.
-          </p>
+        <p className="text-sm font-semibold text-slate-600">{empty.title}</p>
+        {empty.hint && (
+          <p className="max-w-[16rem] text-xs leading-5 text-slate-400">{empty.hint}</p>
         )}
       </div>
     );
@@ -362,10 +384,11 @@ function ConversationList({
 
   return (
     <div className="min-h-0 flex-1 overflow-y-auto">
-      {rows.map((c) => (
+      {rows.map((c, i) => (
         <ConversationRow
           key={c.id}
           row={c}
+          index={i}
           active={c.id === selectedId}
           onClick={() => onSelect(c.id)}
         />
@@ -376,10 +399,12 @@ function ConversationList({
 
 function ConversationRow({
   row,
+  index,
   active,
   onClick,
 }: {
   row: Conversation;
+  index: number;
   active: boolean;
   onClick: () => void;
 }) {
@@ -388,9 +413,27 @@ function ConversationRow({
       type="button"
       onClick={onClick}
       aria-current={active ? "true" : undefined}
-      className="flex w-full items-center gap-3 border-b px-3 py-2.5 text-start transition hover:bg-slate-50"
-      style={{ borderColor: WA.line, backgroundColor: active ? WA.bar : undefined }}
+      className="animate-row relative flex w-full items-center gap-3 border-b px-3 py-2.5 text-start transition-colors duration-200 hover:bg-slate-50"
+      style={{
+        borderColor: WA.line,
+        backgroundColor: active ? WA.bar : undefined,
+        // Only the first screenful is staggered. Past that the delay would be
+        // longer than the scroll takes to reach the row, so it would arrive
+        // already late; and rows are keyed, so a poll that changes nothing
+        // re-runs no animation at all.
+        animationDelay: `${Math.min(index, 11) * 25}ms`,
+      }}
     >
+      {/* The selected row's own mark, growing from the middle out. The
+          background tint alone was doing this job and it is nearly invisible
+          against a list of white rows. */}
+      <span
+        aria-hidden
+        className={`absolute inset-y-1 start-0 w-[3px] rounded-full transition-transform duration-200 ${
+          active ? "scale-y-100" : "scale-y-0"
+        }`}
+        style={{ backgroundColor: WA.badge }}
+      />
       <Avatar name={row.name} kind={row.contact_kind} />
       <div className="min-w-0 flex-1">
         <div className="flex items-baseline gap-2">
@@ -406,7 +449,7 @@ function ConversationRow({
           </p>
           {row.unread > 0 && (
             <span
-              className="shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-bold text-white"
+              className="animate-scale-up shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-bold text-white"
               style={{ backgroundColor: WA.badge }}
             >
               {arabicDigits(row.unread)}
@@ -708,7 +751,7 @@ function WindowTimer({ conversation: c }: { conversation: Conversation }) {
 
   return (
     <div
-      className={`flex items-center justify-center gap-2 border-b border-slate-200 px-3 py-1.5 text-[11px] font-semibold ${tone}`}
+      className={`flex animate-fade-in items-center justify-center gap-2 border-b border-slate-200 px-3 py-1.5 text-[11px] font-semibold transition-colors duration-700 ${tone}`}
       title="واتساب يسمح بالرد بنص حر ٢٤ ساعة من آخر رسالة يرسلها الشخص. العدّاد يرجع من أوله لو بعت تاني."
     >
       <Clock className="h-3.5 w-3.5 shrink-0" />
@@ -755,7 +798,7 @@ function Bubble({ message: m }: { message: Message }) {
         // speaker is squared off and the other three are round, which is what
         // makes a run of bubbles read as coming from one side before a single
         // word is read.
-        className={`max-w-[85%] px-2.5 py-1.5 text-sm leading-6 shadow-sm sm:max-w-[70%] ${
+        className={`animate-bubble max-w-[85%] px-2.5 py-1.5 text-sm leading-6 shadow-sm sm:max-w-[70%] ${
           out ? "rounded-2xl rounded-es-md" : "rounded-2xl rounded-ss-md"
         }`}
         style={{
@@ -764,6 +807,24 @@ function Bubble({ message: m }: { message: Message }) {
           border: failed ? "1px solid #FECDD3" : undefined,
         }}
       >
+        {/* An automated message is not a typed one, and a teacher reading back
+            through a thread has to be able to tell which sentences a person
+            chose. The footer cannot say it - `sent_by_name` is null for these,
+            precisely because nobody sent them. */}
+        {m.kind === "template" && (
+          <span
+            title={
+              m.template_name
+                ? `رسالة تلقائية من النظام · قالب: ${m.template_name}`
+                : "رسالة تلقائية أرسلها النظام كقالب معتمد"
+            }
+            className="mb-1 inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] font-semibold"
+            style={{ backgroundColor: "rgba(0,0,0,0.06)", color: WA.muted }}
+          >
+            <FileText className="h-3 w-3" />
+            تلقائية
+          </span>
+        )}
         {m.has_media && <Attachment message={m} outgoing={out} />}
         {m.body && <p className="whitespace-pre-wrap break-words">{m.body}</p>}
 
@@ -956,14 +1017,28 @@ function Composer({
   }, [text]);
 
   if (!c.window_open) {
+    // Two different shuts, and telling them apart is the whole point. "It ran
+    // out" is a thing that happened; "it was never open" is a thing that has
+    // not happened yet, and reading the first when the second is true makes the
+    // feature look broken - the teacher goes looking for the reply that expired
+    // and there is none.
+    const neverWrote = !c.last_inbound_at;
     return (
-      <div className="flex items-start gap-2 border-t border-slate-200 bg-amber-50 px-4 py-3 text-xs leading-6 text-amber-800">
+      <div className="animate-fade-in flex items-start gap-2 border-t border-slate-200 bg-amber-50 px-4 py-3 text-xs leading-6 text-amber-800">
         <MessageCircleOff className="mt-0.5 h-4 w-4 shrink-0" />
-        <p>
-          انتهت مدة الرد الحر. واتساب يسمح بالرد بنص حر لمدة <b>٢٤ ساعة</b> فقط من آخر رسالة يرسلها
-          الشخص، وبعدها لا يقبل إلا القوالب المعتمدة. تقدر تبعتله رسالة قالب من أزرار الحضور أو
-          الغياب أو الدرجات، ولو رد عليك تفتح المحادثة تاني.
-        </p>
+        {neverWrote ? (
+          <p>
+            لسه محدش كتب من الرقم ده. واتساب مبيسمحش تبدأ بنص حر — الرسايل اللي بيبدأها السنتر
+            لازم تكون <b>قوالب معتمدة</b>، وده اللي بتبعته أزرار الحضور والغياب والدرجات. أول ما
+            يرد عليك، الشباك يفتح <b>٢٤ ساعة</b> وتقدر تكتب أي كلام.
+          </p>
+        ) : (
+          <p>
+            انتهت مدة الرد الحر. واتساب يسمح بالرد بنص حر لمدة <b>٢٤ ساعة</b> فقط من آخر رسالة
+            يرسلها الشخص، وبعدها لا يقبل إلا القوالب المعتمدة. تقدر تبعتله رسالة قالب من أزرار
+            الحضور أو الغياب أو الدرجات، ولو رد عليك تفتح المحادثة تاني.
+          </p>
+        )}
       </div>
     );
   }

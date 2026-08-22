@@ -144,6 +144,41 @@ body {
   animation: slide-down 0.25s ease-out;
 }
 
+/* A message landing in a thread. Short on purpose: switching conversations
+   mounts every bubble at once, and anything slower reads as the thread being
+   slow to load rather than as the messages arriving. */
+@keyframes bubble-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+.animate-bubble {
+  animation: bubble-in 0.18s cubic-bezier(0.22, 1, 0.36, 1) backwards;
+}
+
+/* A conversation row arriving in the list, entering from the start edge - which
+   is the right in this layout, so the offset is positive. `backwards` because
+   the caller staggers these: without it a delayed row is painted at full
+   opacity first and then jumps back to the start of its own animation. */
+@keyframes row-in {
+  from {
+    opacity: 0;
+    transform: translateX(0.5rem);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+.animate-row {
+  animation: row-in 0.22s ease-out backwards;
+}
+
 /* Anyone who asked the OS for less motion gets none of it. */
 @media (prefers-reduced-motion: reduce) {
   *,
