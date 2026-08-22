@@ -280,6 +280,11 @@ export class WebSyncStore implements SyncStore {
     // One student's lesson-by-lesson history, as the registration panel loads it.
     const history = /^\/registrations\/history\/([^/]+)$/.exec(rawPath);
     if (history) return this.readHistory(history[1]);
+    // Who one student is confusable with. Worth mirroring because the desk that
+    // needs it is the one most often offline, and it is answerable here: the
+    // mirror already holds the whole roster, which is the only input.
+    const conflicts = /^\/students\/([^/]+)\/conflicts$/.exec(rawPath);
+    if (conflicts) return this.readConflicts(conflicts[1]);
     // Who missed a lesson - the only messaging path the mirror can answer, and
     // it answers it from attendance alone, which is data this app does own.
     const absentees = /^\/messaging\/whatsapp\/lectures\/([^/]+)\/groups\/([^/]+)\/absentees$/
@@ -693,6 +698,65 @@ export class WebSyncStore implements SyncStore {
       .filter((r) => (groupless ? r.group_id == null : !groupId || r.group_id === groupId))
       .map((r) => reconstructRegistration(r, studentById.get(String(r.student_id)), lessonsByStudent));
     return toPage(rows, size);
+  }
+
+  /**
+   * Every other record sharing this student's exact name or any of their
+   * numbers, in the shape `GET /students/{id}/conflicts` returns.
+   *
+   * <p>Split the same three ways as the server's answer, and for the same
+   * reason: a duplicated name or a student's own number on somebody else's
+   * record is a fault, while a shared guardian number is what siblings look
+   * like. Collapsing them would make the desk chase the siblings.
+   *
+   * <p>A number the student holds on BOTH of their own lists counts as theirs -
+   * the stronger reading, and the one worth acting on.
+   */
+  private async readConflicts(studentId: string): Promise<Row | undefined> {
+    const me = await getOne<Row>(this.db, STORES.students, studentId);
+    if (!me) return undefined; // unknown here: let the caller see the real error
+    const rows = (await getAll<Row>(this.db, STORES.students)).filter(
+      (r) => r.deleted_at == null && String(r.id) !== studentId,
+    );
+
+    const digits = (p: unknown) => String(p ?? "").replace(/\D/g, "");
+    const listOf = (r: Row, key: string) =>
+      new Set(((r[key] as string[] | undefined) ?? []).map(digits).filter(Boolean));
+
+    const peer = (r: Row, asGuardian: boolean | null): Row => ({
+      id: r.id,
+      serial: r.serial ?? null,
+      name: r.name ?? "",
+      grade: r.grade ?? null,
+      as_guardian: asGuardian,
+    });
+
+    const myName = String(me.name ?? "").trim();
+    const same_name = myName
+      ? rows.filter((r) => String(r.name ?? "").trim() === myName).map((r) => peer(r, null))
+      : [];
+
+    const mine = listOf(me, "student_phones");
+    const guardian = listOf(me, "parent_phones");
+    for (const d of mine) guardian.delete(d);
+
+    const clashes = (phones: Set<string>): Row[] =>
+      [...phones]
+        .map((phone) => ({
+          phone,
+          peers: rows
+            .filter((r) => phonesOf(r).some((p) => digits(p) === phone))
+            // How the OTHER record holds it: their own number outranks their
+            // guardian's, matching the server's bool_or.
+            .map((r) => peer(r, !listOf(r, "student_phones").has(phone))),
+        }))
+        .filter((c) => c.peers.length > 0);
+
+    return {
+      same_name,
+      student_phone: clashes(mine),
+      parent_phone: clashes(guardian),
+    };
   }
 
   private async readStudents(params: URLSearchParams): Promise<Page<Row>> {

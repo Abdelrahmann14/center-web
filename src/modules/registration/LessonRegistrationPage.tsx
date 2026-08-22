@@ -18,6 +18,8 @@ import {
   Check,
   Camera,
   Percent,
+  MessageCircleOff,
+  Users2,
 } from "@/components/icons";
 import { THEAD } from "@/components/tableStyles";
 import { api, ApiError, isOfflineError, qs, type Page } from "@/lib/api";
@@ -27,6 +29,7 @@ import { useWhatsappAction } from "@/lib/useWhatsappAvailability";
 import { useBarcodeScanner } from "@/lib/useBarcodeScanner";
 import { CameraScanner, cameraScanSupported } from "@/components/CameraScanner";
 import { searchMode } from "@/lib/studentSearch";
+import { localPhone } from "@/lib/phone";
 import { homeworkLabel } from "@/lib/homework";
 import {
   Select,
@@ -75,6 +78,34 @@ interface HistoryItem {
   /** Null when the homework had no issue - the card then says nothing about it. */
   homework_flag: string | null;
 }
+
+/** Another record this student is confusable with. */
+interface ConflictPeer {
+  id: string;
+  serial: number | null;
+  name: string;
+  grade: string | null;
+  /**
+   * How the OTHER record holds the shared number: true = as their guardian's,
+   * false = as their own, null for a name clash where no number is involved.
+   */
+  as_guardian: boolean | null;
+}
+interface PhoneClash {
+  phone: string;
+  peers: ConflictPeer[];
+}
+interface Conflicts {
+  same_name: ConflictPeer[];
+  student_phone: PhoneClash[];
+  parent_phone: PhoneClash[];
+}
+
+/**
+ * Stable empty map, so a render before the reachability answer lands does not
+ * hand every child a brand-new object and re-run their memos for nothing.
+ */
+const NO_REACH: Record<string, boolean> = {};
 
 const STATUS_AR: Record<string, string> = { present: "حاضر", absent: "غائب", removed: "مطرود" };
 // The value is what the database stores; the label drops the "واجب" the field
@@ -153,6 +184,20 @@ export default function LessonRegistrationPage() {
   // Set when auto-send is on but the student has no guardian number: the user is
   // warned before the attendance is committed, since nothing would be sent.
   const [waWarn, setWaWarn] = useState(false);
+
+  /**
+   * Which numbers WhatsApp could not reach, shared with the students page
+   * through the cache so the desk and the roster never disagree about a family.
+   *
+   * <p>Nothing offline can answer this - it is built from delivery reports the
+   * server holds - so a disconnected desk simply sees no marks, which is the
+   * honest answer rather than a reassuring one.
+   */
+  const reachQ = useCachedGet<Record<string, boolean>>("/messaging/whatsapp/reachability");
+  const reach = reachQ.data ?? NO_REACH;
+
+  /** Who the picked student is confusable with. Null until answered. */
+  const [conflicts, setConflicts] = useState<Conflicts | null>(null);
 
   const [gradeLectures, setGradeLectures] = useState<Lecture[]>([]);
   const [matches, setMatches] = useState<Student[]>([]);
@@ -303,6 +348,23 @@ export default function LessonRegistrationPage() {
   }, [selectedId]);
 
 
+  // Re-asked after an edit as well as after a pick: fixing the mistyped digit
+  // that caused the clash should clear the notice, not leave it accusing.
+  useEffect(() => {
+    setConflicts(null);
+    if (!selectedId) return;
+    let cancelled = false;
+    api
+      .get<Conflicts>(`/students/${selectedId}/conflicts`)
+      .then((c) => !cancelled && setConflicts(c))
+      // Advisory: a desk that may register but may not browse students gets a
+      // 403 here, and the screen carries on saying nothing rather than erroring.
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedId, regReloadKey]);
+
   function onGradeChange(v: string) {
     setGrade(v);
     setGroupId("");
@@ -313,6 +375,7 @@ export default function LessonRegistrationPage() {
   // to carry over to the next student registered.
   function clearStudent() {
     setSelected(null);
+    setConflicts(null);
     setHistory([]);
     setSearch("");
     setMatches([]);
@@ -770,6 +833,8 @@ export default function LessonRegistrationPage() {
             onHwChange={setHwFlag}
             onPrimary={onPrimary}
             history={previousHistory}
+            reach={reach}
+            conflicts={conflicts}
             alreadyAttendedGroup={otherGroupReg ? label(otherGroupReg.registered_group_id) : null}
             onEdit={() => setEditOpen(true)}
             onUnregister={sameGroupReg ? () => setConfirmUnregister(true) : undefined}
@@ -881,6 +946,8 @@ function StudentPanel({
   onHwChange,
   onPrimary,
   history,
+  reach,
+  conflicts,
   alreadyAttendedGroup,
   onEdit,
   onUnregister,
@@ -894,6 +961,10 @@ function StudentPanel({
   onHwChange: (v: string) => void;
   onPrimary: () => void;
   history: HistoryItem[];
+  /** Phone (local form) -> whether WhatsApp reached it. Absent = never tried. */
+  reach: Record<string, boolean>;
+  /** Who this student is confusable with; null while unanswered. */
+  conflicts: Conflicts | null;
   /** The group's label when the student already attended this lesson elsewhere. */
   alreadyAttendedGroup?: string | null;
   /** Opens the full student form - the SAME one used on the students page. */
@@ -901,6 +972,26 @@ function StudentPanel({
   /** Only set when the student is already registered in THIS group's session. */
   onUnregister?: () => void;
 }) {
+  /**
+   * The student's numbers a WhatsApp message came back undeliverable from.
+   *
+   * <p>A flag and not just the dots below, because the phone fields collapse
+   * several numbers behind a dropdown: a red dot on the second number was drawn
+   * on something nobody had opened. This is the one thing on the panel the desk
+   * can fix while the student is still standing there.
+   *
+   * <p>Deduplicated by number - one phone listed as both the student's and the
+   * guardian's is one phone, and counting it twice would say "2" about one.
+   */
+  const unreachable = useMemo(() => {
+    if (!student) return [];
+    const seen = new Map<string, string>();
+    for (const p of [...student.student_phones, ...student.parent_phones]) {
+      const key = localPhone(p);
+      if (key && reach[key] === false && !seen.has(key)) seen.set(key, p);
+    }
+    return [...seen.values()];
+  }, [student, reach]);
 
   return (
     <div className="mt-6 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
@@ -941,6 +1032,20 @@ function StudentPanel({
           {/* Money flag: any student under the centre price - discounted or fully
               exempt - so a fee problem is visible at a glance. The reason itself
               is shown among the data, beside the price box. Orange. */}
+          {/* Cannot be reached on WhatsApp. Rose, because unlike every other
+              flag here this one is not about the lesson - it is data that is
+              wrong, and the desk is the only place it gets corrected. */}
+          {student && unreachable.length > 0 && (
+            <span
+              title={`آخر رسالة واتساب لهذه الأرقام لم تصل - غالبًا لا يوجد واتساب عليها: ${unreachable.join("، ")}`}
+              className="inline-flex w-fit items-center gap-1.5 rounded-xl border border-rose-400 bg-rose-100 px-3 py-1.5 font-medium text-rose-800"
+            >
+              <MessageCircleOff className="h-4 w-4 shrink-0" />
+              {unreachable.length === 1
+                ? "رقم بدون واتساب"
+                : `${unreachable.length} أرقام بدون واتساب`}
+            </span>
+          )}
           {student?.is_discounted && (
             <span
               title="سعر مخفّض عن سعر السنتر - السبب ضمن البيانات بجانب السعر"
@@ -1002,6 +1107,8 @@ function StudentPanel({
         )}
       </div>
 
+      <ConflictNotes conflicts={conflicts} />
+
       {/* Read-only view of the student's data. Editing goes through the full
           form (the pencil button); nothing is edited inline here anymore. */}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
@@ -1035,8 +1142,8 @@ function StudentPanel({
             value={student.discount_reason}
           />
         )}
-        <PhonesField label="هاتف الطالب" phones={student?.student_phones} />
-        <PhonesField label="هاتف ولي الأمر" phones={student?.parent_phones} />
+        <PhonesField label="هاتف الطالب" phones={student?.student_phones} reach={reach} />
+        <PhonesField label="هاتف ولي الأمر" phones={student?.parent_phones} reach={reach} />
         <div>
           <FieldLabel>الحالة</FieldLabel>
           <ValueBox tone={student ? (student.is_active ? "green" : "red") : undefined}>
@@ -1304,10 +1411,48 @@ function Info({ label, value, ltr }: { label: string; value: React.ReactNode; lt
   );
 }
 
+/**
+ * What WhatsApp last did with one number, as a dot.
+ *
+ * <p>Three states, two of them drawn - the same rule the students page follows,
+ * so the mark means one thing across the app. Green: a message to this number
+ * was reported delivered. Red: the last attempt came back undeliverable. A
+ * number nobody has messaged gets NOTHING, because a grey "unknown" dot beside
+ * every number on a fresh workspace teaches the eye to skip all three.
+ *
+ * <p>Red says "did not arrive", not "has no WhatsApp": Meta returns one bucket
+ * error for several causes and never says which applied.
+ */
+function ReachDot({ phone, reach }: { phone: string; reach: Record<string, boolean> }) {
+  const state = reach[localPhone(phone)];
+  if (state === undefined) return null;
+  return (
+    <span
+      title={
+        state
+          ? "وصلت رسالة واتساب لهذا الرقم من قبل"
+          : "آخر رسالة واتساب لهذا الرقم لم تصل - غالبًا لا يوجد واتساب عليه"
+      }
+      className={`h-1.5 w-1.5 shrink-0 rounded-full ${state ? "bg-green-500" : "bg-rose-500"}`}
+    />
+  );
+}
+
 // Phone field. Single number → box + copy. Multiple → dropdown list, each row
-// with its own copy button.
-function PhonesField({ label, phones }: { label: string; phones?: string[] | null }) {
+// with its own copy button. Every number carries its WhatsApp dot.
+function PhonesField({
+  label,
+  phones,
+  reach,
+}: {
+  label: string;
+  phones?: string[] | null;
+  reach: Record<string, boolean>;
+}) {
   const list = phones?.filter(Boolean) ?? [];
+  // The dropdown shows only the first number until it is opened, so a bad
+  // second number would be invisible. The counter carries the bad news up.
+  const anyUnreachable = list.some((p) => reach[localPhone(p)] === false);
   const toast = useToast();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -1348,8 +1493,9 @@ function PhonesField({ label, phones }: { label: string; phones?: string[] | nul
         <div className="flex items-stretch gap-2">
           <div
             dir="ltr"
-            className="flex min-h-[42px] flex-1 items-center rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-right text-slate-800"
+            className="flex min-h-[42px] flex-1 items-center gap-1.5 rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-right text-slate-800"
           >
+            <ReachDot phone={list[0]} reach={reach} />
             {list[0]}
           </div>
           <button
@@ -1376,9 +1522,19 @@ function PhonesField({ label, phones }: { label: string; phones?: string[] | nul
           open ? "border-accent ring-2 ring-accent/20" : "border-slate-200 hover:border-slate-300"
         }`}
       >
-        <span>{list[0]}</span>
+        <span className="flex items-center gap-1.5">
+          <ReachDot phone={list[0]} reach={reach} />
+          {list[0]}
+        </span>
         <span className="flex items-center gap-1.5 text-slate-400">
-          <span className="rounded-md bg-slate-200 px-1.5 text-xs text-slate-600">{list.length}</span>
+          <span
+            title={anyUnreachable ? "أحد هذه الأرقام لم تصله رسالة واتساب" : undefined}
+            className={`rounded-md px-1.5 text-xs ${
+              anyUnreachable ? "bg-rose-200 text-rose-800" : "bg-slate-200 text-slate-600"
+            }`}
+          >
+            {list.length}
+          </span>
           <ChevronDown className={`h-4 w-4 transition-transform ${open ? "rotate-180" : ""}`} />
         </span>
       </button>
@@ -1390,7 +1546,10 @@ function PhonesField({ label, phones }: { label: string; phones?: string[] | nul
               dir="ltr"
               className="flex items-center justify-between gap-2 rounded-lg px-3 py-2 text-right transition hover:bg-slate-100"
             >
-              <span className="text-sm text-slate-700">{p}</span>
+              <span className="flex items-center gap-1.5 text-sm text-slate-700">
+                <ReachDot phone={p} reach={reach} />
+                {p}
+              </span>
               <button
                 type="button"
                 onClick={() => copy(p)}
@@ -1403,6 +1562,108 @@ function PhonesField({ label, phones }: { label: string; phones?: string[] | nul
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * Who else on the roster this student could be confused with.
+ *
+ * <p>The students page finds this by counting over the whole roster it already
+ * holds in the browser. This screen holds ONE student - resolved from a scan,
+ * usually - and so could never work it out; it asks, and the answer is put where
+ * the decision is made instead of a page away.
+ *
+ * <p>Two colours, and they are the students page's colours on purpose. Purple is
+ * a duplicate to clean up. Sky is a shared guardian number, which is what a pair
+ * of siblings looks like and is not a fault - so it is worded as a remark and
+ * never as a warning. Somebody who has read the roster table already knows both.
+ *
+ * <p>Nothing here blocks the registration. The desk is told; the desk decides.
+ */
+function ConflictNotes({ conflicts }: { conflicts: Conflicts | null }) {
+  if (!conflicts) return null;
+  const { same_name: names, student_phone: own, parent_phone: guardian } = conflicts;
+  if (names.length === 0 && own.length === 0 && guardian.length === 0) return null;
+  return (
+    <div className="mb-4 space-y-1.5">
+      {names.length > 0 && (
+        <Note tone="purple" icon={<Copy className="h-4 w-4 shrink-0" />}>
+          <b className="font-semibold">اسم مكرر</b> — نفس الاسم مسجَّل أيضًا لـ{" "}
+          <PeerList peers={names} />
+        </Note>
+      )}
+      {own.map((c) => (
+        <Note key={c.phone} tone="purple" icon={<Copy className="h-4 w-4 shrink-0" />}>
+          <b className="font-semibold">رقم الطالب</b>{" "}
+          <span dir="ltr" className="font-medium">
+            {c.phone}
+          </span>{" "}
+          مسجَّل أيضًا لـ <PeerList peers={c.peers} guardianSide={false} />
+        </Note>
+      ))}
+      {guardian.map((c) => (
+        <Note key={c.phone} tone="sky" icon={<Users2 className="h-4 w-4 shrink-0" />}>
+          <b className="font-semibold">رقم ولي الأمر</b>{" "}
+          <span dir="ltr" className="font-medium">
+            {c.phone}
+          </span>{" "}
+          مشترك مع <PeerList peers={c.peers} guardianSide />
+        </Note>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * The colliding records, named the way the desk can act on: the code is printed
+ * on the card in their hand, and the grade is the next question they would ask.
+ *
+ * @param guardianSide which side of the OTHER record normally holds this number.
+ *   The annotation is printed only when the answer is the surprising one - on a
+ *   guardian-number clash the other record almost always holds it as a guardian
+ *   number too, and saying so every time would bury the case where it does not
+ */
+function PeerList({ peers, guardianSide }: { peers: ConflictPeer[]; guardianSide?: boolean }) {
+  return (
+    <>
+      {peers.map((p, i) => {
+        const odd = p.as_guardian != null && p.as_guardian !== !!guardianSide;
+        return (
+          <span key={p.id}>
+            {i > 0 && "، "}
+            <b className="font-semibold">{p.name}</b>
+            <span className="opacity-75">
+              {" ("}
+              كود {p.serial ?? "؟"}
+              {p.grade ? ` · ${p.grade}` : ""}
+              {odd ? (p.as_guardian ? " · كرقم ولي أمره" : " · كرقمه هو") : ""}
+              {")"}
+            </span>
+          </span>
+        );
+      })}
+    </>
+  );
+}
+
+function Note({
+  tone,
+  icon,
+  children,
+}: {
+  tone: "purple" | "sky";
+  icon: React.ReactNode;
+  children: React.ReactNode;
+}) {
+  const skin =
+    tone === "purple"
+      ? "border-purple-300 bg-purple-100 text-purple-900"
+      : "border-sky-300 bg-sky-100 text-sky-900";
+  return (
+    <div className={`flex items-start gap-2 rounded-xl border px-3 py-2 text-sm ${skin}`}>
+      <span className="mt-1">{icon}</span>
+      <span className="leading-6">{children}</span>
     </div>
   );
 }
