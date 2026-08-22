@@ -111,13 +111,24 @@ const WA = {
 /**
  * The faint pattern behind a conversation.
  *
- * <p>Our own tile, not WhatsApp's doodles - those are theirs. Two ring sizes on
- * a 60px grid at four percent, which is enough to stop the canvas reading as
- * flat card stock and far too little to compete with a word of text. Inline as a
- * data URI so the page still draws it with no connection.
+ * <p>Our own drawing, not WhatsApp's file - that artwork is theirs. The same
+ * idea, because the idea is what makes a chat read as a chat rather than as a
+ * form: a scatter of one-stroke everyday objects on a tile big enough (260px)
+ * that the repeat is not seen as a grid, at four and a half percent of the ink
+ * colour - enough to stop the canvas reading as flat card stock, far too little
+ * to compete with a word of text.
+ *
+ * <p>It replaced two sizes of ring, which tiled every 60px and read as
+ * wallpaper. Inline as a data URI so the page still draws it with no connection.
  */
 const CANVAS_PATTERN =
-  "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='60' height='60' viewBox='0 0 60 60'%3E%3Cg fill='none' stroke='%230B141A' stroke-opacity='0.04' stroke-width='1.5'%3E%3Ccircle cx='15' cy='15' r='6'/%3E%3Ccircle cx='45' cy='45' r='9'/%3E%3Cpath d='M42 12l6 6M48 12l-6 6M12 42l6 6M18 42l-6 6'/%3E%3C/g%3E%3C/svg%3E\")";
+  "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='260' height='260' viewBox='0 0 260 260'%3E%3Cg fill='none' stroke='%230B141A' stroke-opacity='0.045' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M30 42c-8-6-13-11-13-17a6 6 0 0 1 13-3 6 6 0 0 1 13 3c0 6-5 11-13 17z'/%3E%3Cpath d='M104 16l6 12 13 2-9 9 2 13-12-6-12 6 2-13-9-9 13-2z'/%3E%3Cpath d='M176 46a8 8 0 0 1 1-16 12 12 0 0 1 22-3 9 9 0 0 1 1 19z'/%3E%3Cpath d='M228 22h18v12a9 9 0 0 1-18 0z'/%3E%3Cpath d='M246 25h4a5 5 0 0 1 0 10h-4'/%3E%3Cpath d='M224 40h26'/%3E%3Ccircle cx='40' cy='104' r='14'/%3E%3Cpath d='M34 100v2M46 100v2M33 109a9 9 0 0 0 14 0'/%3E%3Cpath d='M92 112l38-15-15 38-6-14z'/%3E%3Cpath d='M92 112l25 9'/%3E%3Cpath d='M176 128V98l20-5v28'/%3E%3Ccircle cx='170' cy='128' r='6'/%3E%3Ccircle cx='190' cy='121' r='6'/%3E%3Cpath d='M240 88l-13 20h11l-5 18 15-21h-11z'/%3E%3Cpath d='M16 186c0-15 13-25 28-25 0 15-12 27-28 25z'/%3E%3Cpath d='M21 181l18-15'/%3E%3Cpath d='M96 156a16 16 0 1 0 10 25 18 18 0 0 1-10-25z'/%3E%3Cpath d='M140 158h8l3-5h12l3 5h8v20h-34z'/%3E%3Ccircle cx='157' cy='168' r='6'/%3E%3Cpath d='M230 150a11 11 0 1 1 22 0c0 8-11 16-11 16s-11-8-11-16z'/%3E%3Cpath d='M241 166v8'/%3E%3Cpath d='M22 232l16-13 16 13'/%3E%3Cpath d='M26 229v18h24v-18'/%3E%3Cpath d='M34 247v-9h8v9'/%3E%3Cpath d='M92 232c9-11 26-11 34 0-8 11-25 11-34 0z'/%3E%3Cpath d='M126 232l10-7v14z'/%3E%3Ccircle cx='102' cy='230' r='1.5'/%3E%3Ccircle cx='186' cy='224' r='4'/%3E%3Ccircle cx='186' cy='214' r='5'/%3E%3Ccircle cx='196' cy='224' r='5'/%3E%3Ccircle cx='186' cy='234' r='5'/%3E%3Ccircle cx='176' cy='224' r='5'/%3E%3Cpath d='M228 208h11v22h-11z'/%3E%3Cpath d='M239 208h11v22h-11z'/%3E%3Ccircle cx='128' cy='64' r='7'/%3E%3Cpath d='M128 52v-4M128 80v4M116 64h-4M144 64h4M120 56l-3-3M136 72l3 3M136 56l3-3M120 72l-3 3'/%3E%3Cpath d='M56 154h26v20H56z'/%3E%3Cpath d='M56 160h26M69 154v20'/%3E%3Cpath d='M69 154c-7-7-14-1-8 1 5 2 8-1 8-1zM69 154c7-7 14-1 8 1-5 2-8-1-8-1z'/%3E%3C/g%3E%3C/svg%3E\")";
+
+/** Canvas plus pattern, for the two places that paint the conversation. */
+const CANVAS = {
+  backgroundColor: WA.canvas,
+  backgroundImage: CANVAS_PATTERN,
+} as const;
 
 /**
  * How often each pane re-reads.
@@ -485,7 +496,7 @@ function NothingSelected() {
   return (
     <div
       className="flex flex-1 flex-col items-center justify-center gap-3 p-8 text-center"
-      style={{ backgroundColor: WA.canvas, backgroundImage: CANVAS_PATTERN }}
+      style={CANVAS}
     >
       <MessageCircle className="h-10 w-10 text-slate-300" />
       <p className="text-sm font-semibold text-slate-600">اختر محادثة لقراءتها والرد عليها</p>
@@ -558,27 +569,33 @@ function Thread({
       <ThreadHeader conversation={conversation} onBack={onBack} onChanged={onChanged} />
       <WindowTimer conversation={conversation} />
 
-      <div
-        ref={scroller}
-        onScroll={onScroll}
-        className="min-h-0 flex-1 space-y-1 overflow-y-auto px-3 py-4 sm:px-6"
-        style={{ backgroundColor: WA.canvas, backgroundImage: CANVAS_PATTERN }}
-      >
-        {messages === null ? (
-          <LoaderBlock />
-        ) : messages.length === 0 ? (
-          <p className="py-10 text-center text-xs text-slate-400">لا توجد رسائل في هذه المحادثة</p>
-        ) : (
-          messages.map((m, i) => (
-            <div key={m.id}>
-              {dayChanged(messages[i - 1], m) && <DaySeparator iso={m.occurred_at} />}
-              <Bubble message={m} />
-            </div>
-          ))
-        )}
-      </div>
+      {/* The canvas holds the composer as well as the messages, so the pattern
+          runs unbroken behind both and the box reads as floating ON the
+          conversation rather than sitting on a grey shelf under it. Painting the
+          composer's own strip instead would restart the tile and draw a seam
+          across the screen at exactly the height the eye rests. */}
+      <div className="flex min-h-0 flex-1 flex-col" style={CANVAS}>
+        <div
+          ref={scroller}
+          onScroll={onScroll}
+          className="min-h-0 flex-1 space-y-1 overflow-y-auto px-3 py-4 sm:px-6"
+        >
+          {messages === null ? (
+            <LoaderBlock />
+          ) : messages.length === 0 ? (
+            <p className="py-10 text-center text-xs text-slate-400">لا توجد رسائل في هذه المحادثة</p>
+          ) : (
+            messages.map((m, i) => (
+              <div key={m.id}>
+                {dayChanged(messages[i - 1], m) && <DaySeparator iso={m.occurred_at} />}
+                <Bubble message={m} />
+              </div>
+            ))
+          )}
+        </div>
 
-      <Composer conversation={conversation} onSent={appended} />
+        <Composer conversation={conversation} onSent={appended} />
+      </div>
     </div>
   );
 }
@@ -973,8 +990,13 @@ function Composer({
        button parked beside it. The whole strip is what takes the focus ring, so
        the two read as one control - which is what every messenger the reader
        has ever used looks like. */
-    <div className="border-t p-2 sm:p-3" style={{ backgroundColor: WA.bar, borderColor: WA.line }}>
-      <div className="flex items-end gap-1 rounded-[1.375rem] border border-transparent bg-white p-1 shadow-sm transition focus-within:border-accent">
+    /* No bar, no border, no background of its own: the strip is transparent and
+       the conversation shows through it, so the pill reads as floating on the
+       chat rather than docked below it. The shadow is what lifts it off - it is
+       doing the job the grey bar used to do, without cutting the canvas in
+       two. */
+    <div className="p-2 sm:p-3">
+      <div className="flex items-end gap-1 rounded-[1.375rem] border border-transparent bg-white p-1 shadow-md transition focus-within:border-accent">
         <EmojiPickerButton
           onPick={insertEmoji}
           onBeforeOpen={remember}
